@@ -1,0 +1,14 @@
+.DS_Store
+.build/
+build/
+.swiftpm/
+Package.resolved
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+
+# Old pyinstaller artifacts (from previous experiments)
+__pycache__/
+*.pyc
+*.spec
+dist/
