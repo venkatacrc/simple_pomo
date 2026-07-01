@@ -6,15 +6,20 @@ struct FocusView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            VStack(spacing: 22) {
                 phaseTabs
-                timerCard
+                HStack(alignment: .top, spacing: 24) {
+                    SeasonalClockView(diameter: 260)
+                        .frame(maxWidth: .infinity)
+                    timerCard
+                        .frame(maxWidth: .infinity)
+                }
                 activeTaskCard
                 quickTaskList
             }
-            .padding(.horizontal, 32)
-            .padding(.vertical, 28)
-            .frame(maxWidth: 720)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
+            .frame(maxWidth: 1000)
             .frame(maxWidth: .infinity)
         }
     }

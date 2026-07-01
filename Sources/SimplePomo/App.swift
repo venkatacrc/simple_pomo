@@ -18,7 +18,7 @@ struct SimplePomoApp: App {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(timer)
-                .frame(minWidth: 820, minHeight: 640)
+                .frame(minWidth: 960, minHeight: 720)
         }
         .windowResizability(.contentMinSize)
         .commands {
