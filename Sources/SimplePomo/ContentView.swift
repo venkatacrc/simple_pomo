@@ -3,6 +3,9 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var store: DataStore
     @EnvironmentObject var timer: PomodoroTimer
+    @EnvironmentObject var windows: WindowController
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
     @State private var selectedTab: Tab = .focus
 
     enum Tab: String, Hashable, CaseIterable, Identifiable {
@@ -89,6 +92,19 @@ struct ContentView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(.white.opacity(0.12), in: Capsule())
+
+            Button {
+                windows.enterMini(open: openWindow, dismiss: dismissWindow)
+            } label: {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .help("Shrink to floating mini timer (⌘⇧M)")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)

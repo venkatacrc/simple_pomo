@@ -5,6 +5,7 @@ import AppKit
 struct SimplePomoApp: App {
     @StateObject private var store: DataStore
     @StateObject private var timer: PomodoroTimer
+    @StateObject private var windows = WindowController()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
@@ -14,10 +15,11 @@ struct SimplePomoApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Simple Pomo") {
+        WindowGroup("Simple Pomo", id: WindowID.main) {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(timer)
+                .environmentObject(windows)
                 .frame(minWidth: 960, minHeight: 720)
         }
         .windowResizability(.contentMinSize)
@@ -37,7 +39,22 @@ struct SimplePomoApp: App {
                     Button(phase.title) { timer.switchPhase(phase) }
                 }
             }
+            CommandGroup(after: .windowArrangement) {
+                MiniModeToggle()
+                    .environmentObject(windows)
+            }
         }
+
+        Window("Mini Timer", id: WindowID.mini) {
+            MiniTimerView()
+                .environmentObject(store)
+                .environmentObject(timer)
+                .environmentObject(windows)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.topTrailing)
+        .defaultSize(width: 240, height: 72)
 
         Settings {
             SettingsView()
@@ -46,6 +63,21 @@ struct SimplePomoApp: App {
                 .frame(width: 480)
                 .padding()
         }
+    }
+}
+
+/// Menu-item bridge that has access to `@Environment(\.openWindow)` /
+/// `dismissWindow`, which are not available on `Scene` directly.
+private struct MiniModeToggle: View {
+    @EnvironmentObject var windows: WindowController
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        Button(windows.isMini ? "Exit Mini Timer" : "Show Mini Timer") {
+            windows.toggle(open: openWindow, dismiss: dismissWindow)
+        }
+        .keyboardShortcut("m", modifiers: [.command, .shift])
     }
 }
 
