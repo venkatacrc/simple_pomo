@@ -53,8 +53,8 @@ struct SimplePomoApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
-        .defaultPosition(.topTrailing)
-        .defaultSize(width: 240, height: 72)
+        .defaultPosition(.bottomLeading)
+        .defaultSize(width: 140, height: 40)
 
         Settings {
             SettingsView()

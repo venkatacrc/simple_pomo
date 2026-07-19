@@ -11,30 +11,54 @@ struct MiniTimerView: View {
     @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
-        ZStack {
-            background
+        HStack(spacing: 0) {
+            phaseBar
+            HStack(spacing: 5) {
+                Text(timer.displayTime)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .contentTransition(.numericText(countsDown: true))
 
-            HStack(spacing: 12) {
-                phaseDot
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(timer.displayTime)
-                        .font(.system(size: 26, weight: .heavy, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(.white)
-                        .contentTransition(.numericText(countsDown: true))
-                    Text(subtitle)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                Spacer(minLength: 2)
+
+                iconButton(
+                    systemName: timer.isRunning ? "pause.fill" : "play.fill",
+                    size: 18,
+                    iconSize: 9,
+                    tint: 0.24,
+                    help: timer.isRunning ? "Pause" : "Start"
+                ) {
+                    timer.toggle()
                 }
-                Spacer(minLength: 4)
-                controls
+                .keyboardShortcut(.space, modifiers: [])
+
+                iconButton(
+                    systemName: "minus",
+                    size: 16,
+                    iconSize: 10,
+                    tint: 0.16,
+                    help: "Minimize to Dock (⌘M)"
+                ) {
+                    NSApp.keyWindow?.miniaturize(nil)
+                }
+
+                iconButton(
+                    systemName: "arrow.up.left.and.arrow.down.right",
+                    size: 16,
+                    iconSize: 8,
+                    tint: 0.16,
+                    help: "Expand to full window (⌘⇧M)"
+                ) {
+                    windows.exitMini(open: openWindow, dismiss: dismissWindow)
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
         }
-        .frame(width: 240, height: 72)
+        .frame(width: 140, height: 40)
+        .background(background)
         .background(WindowAccessor(configure: configureWindow))
     }
 
@@ -43,71 +67,42 @@ struct MiniTimerView: View {
     private var background: some View {
         LinearGradient(
             colors: [
-                timer.phase.tint.opacity(0.85),
-                timer.phase.accentBackground.opacity(0.95)
+                timer.phase.accentBackground.opacity(0.96),
+                Color.black.opacity(0.88)
             ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
+            startPoint: .leading,
+            endPoint: .trailing
         )
-        .overlay(
-            Rectangle().fill(Color.black.opacity(timer.isRunning ? 0.15 : 0.35))
-        )
+        .overlay(Rectangle().fill(Color.black.opacity(timer.isRunning ? 0.05 : 0.30)))
     }
 
-    private var phaseDot: some View {
-        Circle()
-            .fill(.white)
-            .frame(width: 10, height: 10)
-            .opacity(timer.isRunning ? 1.0 : 0.55)
-            .overlay(
-                Circle()
-                    .stroke(Color.white.opacity(0.4), lineWidth: 4)
-                    .scaleEffect(timer.isRunning ? 1.6 : 1.0)
-                    .opacity(timer.isRunning ? 0.0 : 0.0)
-                    .animation(
-                        timer.isRunning
-                            ? .easeOut(duration: 1.2).repeatForever(autoreverses: false)
-                            : .default,
-                        value: timer.isRunning
-                    )
-            )
+    /// A slim vertical strip of the current phase's tint along the leading edge.
+    private var phaseBar: some View {
+        Rectangle()
+            .fill(timer.phase.tint)
+            .frame(width: 4)
+            .opacity(timer.isRunning ? 1.0 : 0.6)
     }
 
-    private var controls: some View {
-        HStack(spacing: 6) {
-            Button {
-                timer.toggle()
-            } label: {
-                Image(systemName: timer.isRunning ? "pause.fill" : "play.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .frame(width: 26, height: 26)
-                    .foregroundStyle(.white)
-                    .background(Circle().fill(Color.white.opacity(0.22)))
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.space, modifiers: [])
-            .help(timer.isRunning ? "Pause" : "Start")
-
-            Button {
-                windows.exitMini(open: openWindow, dismiss: dismissWindow)
-            } label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .frame(width: 26, height: 26)
-                    .foregroundStyle(.white)
-                    .background(Circle().fill(Color.white.opacity(0.18)))
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut("m", modifiers: [.command, .shift])
-            .help("Return to full window (⌘⇧M)")
+    /// Small circular icon button used for play/pause, minimize, expand.
+    private func iconButton(
+        systemName: String,
+        size: CGFloat,
+        iconSize: CGFloat,
+        tint: Double,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: iconSize, weight: .bold))
+                .frame(width: size, height: size)
+                .foregroundStyle(.white)
+                .background(Circle().fill(Color.white.opacity(tint)))
+                .contentShape(Circle())
         }
-    }
-
-    private var subtitle: String {
-        if let task = store.activeTask {
-            return task.title
-        }
-        return timer.phase.title
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     // MARK: - NSWindow configuration
@@ -122,13 +117,17 @@ struct MiniTimerView: View {
         window.backgroundColor = .clear
         window.styleMask.remove(.resizable)
         window.styleMask.insert(.fullSizeContentView)
+        window.styleMask.insert(.miniaturizable)   // enables ⌘M and Dock miniaturize
         window.collectionBehavior.insert([.canJoinAllSpaces, .fullScreenAuxiliary])
+        // We provide our own play/minimize/expand buttons in the pill, so hide
+        // the standard traffic lights entirely.
+        window.standardWindowButton(.closeButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
-        // Round the whole window
+        // Round the whole window to match the SwiftUI content.
         if let contentView = window.contentView {
             contentView.wantsLayer = true
-            contentView.layer?.cornerRadius = 14
+            contentView.layer?.cornerRadius = 10
             contentView.layer?.masksToBounds = true
         }
     }
