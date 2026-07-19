@@ -7,6 +7,7 @@ struct FocusView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 22) {
+                presetPicker
                 phaseTabs
                 HStack(alignment: .top, spacing: 24) {
                     SeasonalClockView(diameter: 260)
@@ -21,6 +22,54 @@ struct FocusView: View {
             .padding(.vertical, 24)
             .frame(maxWidth: 1000)
             .frame(maxWidth: .infinity)
+        }
+    }
+
+    // MARK: - Preset picker
+
+    private var presetPicker: some View {
+        let active = store.settings.activePreset
+        return HStack(spacing: 8) {
+            ForEach(TimerPreset.allCases) { preset in
+                let isActive = active == preset
+                Button {
+                    applyPreset(preset)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: preset.symbol)
+                            .font(.caption)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(preset.title)
+                                .font(.caption.weight(.semibold))
+                            Text(preset.subtitle)
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.65))
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(
+                        Capsule().fill(
+                            isActive ? Color.white.opacity(0.24) : Color.white.opacity(0.06)
+                        )
+                    )
+                    .overlay(
+                        Capsule().stroke(isActive ? Color.white.opacity(0.5) : .clear, lineWidth: 1)
+                    )
+                    .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+                .help("\(preset.focusMinutes)m focus / \(preset.shortBreakMinutes)m break / \(preset.longBreakMinutes)m long break")
+            }
+        }
+    }
+
+    private func applyPreset(_ preset: TimerPreset) {
+        var settings = store.settings
+        settings.apply(preset)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            store.updateSettings(settings)
+            timer.refreshForSettingsChange()
         }
     }
 

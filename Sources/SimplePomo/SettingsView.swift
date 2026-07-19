@@ -14,6 +14,19 @@ struct SettingsView: View {
         .frame(minWidth: 460, minHeight: 360)
     }
 
+    private var presetBinding: Binding<TimerPreset?> {
+        Binding(
+            get: { store.settings.activePreset },
+            set: { newValue in
+                guard let preset = newValue else { return }
+                var settings = store.settings
+                settings.apply(preset)
+                store.updateSettings(settings)
+                timer.refreshForSettingsChange()
+            }
+        )
+    }
+
     private var settingsBinding: Binding<AppSettings> {
         Binding(
             get: { store.settings },
@@ -28,6 +41,16 @@ struct SettingsView: View {
 
     private var timerSettings: some View {
         Form {
+            Section("Quick presets") {
+                Picker("Preset", selection: presetBinding) {
+                    ForEach(TimerPreset.allCases) { preset in
+                        Text("\(preset.title) — \(preset.subtitle)").tag(Optional(preset))
+                    }
+                    Text("Custom").tag(TimerPreset?.none)
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            }
             Section("Durations (minutes)") {
                 Stepper("Pomodoro: \(store.settings.focusMinutes)",
                         value: settingsBinding.focusMinutes, in: 1...90)
