@@ -69,6 +69,61 @@ struct PomoSession: Identifiable, Codable, Equatable {
     }
 }
 
+// MARK: - Timer presets
+
+/// Named focus/break duration combos users can switch between with one tap.
+enum TimerPreset: String, CaseIterable, Identifiable, Codable {
+    case classic
+    case extended
+    case deepWork
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .classic: return "Classic"
+        case .extended: return "Extended"
+        case .deepWork: return "Deep Work"
+        }
+    }
+
+    var subtitle: String {
+        "\(focusMinutes) / \(shortBreakMinutes)"
+    }
+
+    var symbol: String {
+        switch self {
+        case .classic: return "timer"
+        case .extended: return "hourglass"
+        case .deepWork: return "brain.head.profile"
+        }
+    }
+
+    var focusMinutes: Int {
+        switch self {
+        case .classic: return 25
+        case .extended: return 50
+        case .deepWork: return 90
+        }
+    }
+
+    var shortBreakMinutes: Int {
+        switch self {
+        case .classic: return 5
+        case .extended: return 10
+        case .deepWork: return 20
+        }
+    }
+
+    var longBreakMinutes: Int {
+        switch self {
+        case .classic: return 15
+        case .extended: return 20
+        case .deepWork: return 30
+        }
+    }
+}
+
 // MARK: - Settings
 
 struct AppSettings: Codable, Equatable {
@@ -88,6 +143,22 @@ struct AppSettings: Codable, Equatable {
         case .shortBreak: return shortBreakMinutes
         case .longBreak: return longBreakMinutes
         }
+    }
+
+    /// The preset matching the current durations, if any (used to highlight
+    /// the active choice in the UI). `nil` means the user has custom values.
+    var activePreset: TimerPreset? {
+        TimerPreset.allCases.first {
+            $0.focusMinutes == focusMinutes &&
+            $0.shortBreakMinutes == shortBreakMinutes &&
+            $0.longBreakMinutes == longBreakMinutes
+        }
+    }
+
+    mutating func apply(_ preset: TimerPreset) {
+        focusMinutes = preset.focusMinutes
+        shortBreakMinutes = preset.shortBreakMinutes
+        longBreakMinutes = preset.longBreakMinutes
     }
 }
 
