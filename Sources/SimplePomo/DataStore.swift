@@ -13,18 +13,22 @@ final class DataStore: ObservableObject {
     private let fileURL: URL
     private var saveDebounce: DispatchWorkItem?
 
-    init() {
-        let fm = FileManager.default
-        let appSupport = (try? fm.url(for: .applicationSupportDirectory,
-                                      in: .userDomainMask,
-                                      appropriateFor: nil,
-                                      create: true))
-            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        let dir = appSupport.appendingPathComponent("SimplePomo", isDirectory: true)
-        if !fm.fileExists(atPath: dir.path) {
-            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    init(fileURL: URL? = nil) {
+        if let fileURL {
+            self.fileURL = fileURL
+        } else {
+            let fm = FileManager.default
+            let appSupport = (try? fm.url(for: .applicationSupportDirectory,
+                                          in: .userDomainMask,
+                                          appropriateFor: nil,
+                                          create: true))
+                ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
+            let dir = appSupport.appendingPathComponent("SimplePomo", isDirectory: true)
+            if !fm.fileExists(atPath: dir.path) {
+                try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            }
+            self.fileURL = dir.appendingPathComponent("store.json")
         }
-        self.fileURL = dir.appendingPathComponent("store.json")
         load()
     }
 
@@ -42,6 +46,11 @@ final class DataStore: ObservableObject {
             self.settings = store.settings
         } catch {
             NSLog("SimplePomo: failed to load store: \(error)")
+            // Move the unreadable file aside so the next autosave can't overwrite it.
+            let stamp = Int(Date().timeIntervalSince1970)
+            let aside = fileURL.deletingLastPathComponent()
+                .appendingPathComponent("store.unreadable-\(stamp).json")
+            try? FileManager.default.moveItem(at: fileURL, to: aside)
         }
     }
 
@@ -110,10 +119,54 @@ final class DataStore: ObservableObject {
         return tasks.first(where: { $0.id == id })
     }
 
+    /// Frictionless "what am I working on" capture: reuses an existing open
+    /// task with a matching title + category if one exists (so retyping the
+    /// same thing later the same day doesn't spam duplicates), otherwise
+    /// creates a lightweight ad-hoc task and makes it active immediately —
+    /// no sheet, no required fields. This is the fast path used by the
+    /// quick-capture field on the Focus screen.
+    func setActiveTask(title: String, category: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if let idx = tasks.firstIndex(where: {
+            !$0.isCompleted && !$0.isArchived &&
+            $0.title.caseInsensitiveCompare(trimmed) == .orderedSame &&
+            $0.category == category
+        }) {
+            activeTaskId = tasks[idx].id
+            save()
+            return
+        }
+
+        let task = PomoTask(title: trimmed, category: category, estimatedPomodoros: 1)
+        tasks.append(task)
+        activeTaskId = task.id
+        save()
+    }
+
     // MARK: - Sessions
 
     func recordSession(_ session: PomoSession) {
         sessions.append(session)
+        save()
+    }
+
+    /// Adds a new entry (used by the manual "log past work" sheet) or
+    /// updates an existing one in place, keyed by `id`. Lets people add
+    /// what they worked on at the end of the day, or correct/backfill
+    /// entries later in the week.
+    func upsertSession(_ session: PomoSession) {
+        if let idx = sessions.firstIndex(where: { $0.id == session.id }) {
+            sessions[idx] = session
+        } else {
+            sessions.append(session)
+        }
+        save()
+    }
+
+    func deleteSession(_ session: PomoSession) {
+        sessions.removeAll { $0.id == session.id }
         save()
     }
 

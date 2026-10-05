@@ -56,6 +56,14 @@ swift run
 
 This is the fastest iteration path (debug build, opens the window directly).
 
+If you only have the Command Line Tools (no Xcode.app), the newest SDK can't
+expand SwiftUI's macros. Build against the macOS 26 SDK with the native build
+system instead (`build_app.sh` does this automatically):
+
+```bash
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk swift run --build-system native
+```
+
 ### Open in Xcode
 
 ```bash

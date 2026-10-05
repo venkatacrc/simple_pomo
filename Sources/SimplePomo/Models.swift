@@ -59,6 +59,9 @@ struct PomoSession: Identifiable, Codable, Equatable {
     var phase: Phase
     var startedAt: Date
     var endedAt: Date
+    /// True when this entry was typed in by hand (e.g. logging work from
+    /// earlier in the day or week) rather than produced by a live timer run.
+    var isManual: Bool = false
 
     var durationSeconds: Int {
         max(0, Int(endedAt.timeIntervalSince(startedAt)))
@@ -66,6 +69,39 @@ struct PomoSession: Identifiable, Codable, Equatable {
 
     var durationMinutes: Double {
         Double(durationSeconds) / 60.0
+    }
+
+    /// Convenience constructor for manually-logged work: pick a date and a
+    /// duration in minutes rather than start/end timestamps.
+    static func manual(title: String, category: String, date: Date, minutes: Int) -> PomoSession {
+        PomoSession(
+            taskId: nil,
+            taskTitle: title,
+            category: category,
+            phase: .focus,
+            startedAt: date,
+            endedAt: date.addingTimeInterval(TimeInterval(minutes * 60)),
+            isManual: true
+        )
+    }
+}
+
+extension PomoSession {
+    private enum CodingKeys: String, CodingKey {
+        case id, taskId, taskTitle, category, phase, startedAt, endedAt, isManual
+    }
+
+    /// Store files written before `isManual` existed don't contain the key.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        taskId = try c.decodeIfPresent(UUID.self, forKey: .taskId)
+        taskTitle = try c.decode(String.self, forKey: .taskTitle)
+        category = try c.decode(String.self, forKey: .category)
+        phase = try c.decode(Phase.self, forKey: .phase)
+        startedAt = try c.decode(Date.self, forKey: .startedAt)
+        endedAt = try c.decode(Date.self, forKey: .endedAt)
+        isManual = try c.decodeIfPresent(Bool.self, forKey: .isManual) ?? false
     }
 }
 

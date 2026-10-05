@@ -3,6 +3,9 @@ import SwiftUI
 struct FocusView: View {
     @EnvironmentObject var store: DataStore
     @EnvironmentObject var timer: PomodoroTimer
+    @State private var draftText: String = ""
+    @State private var draftCategory: String = ""
+    @FocusState private var captureFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -181,32 +184,34 @@ struct FocusView: View {
         }
     }
 
-    // MARK: - Active task
+    // MARK: - Quick capture ("what are you working on?")
 
+    /// A frictionless, always-visible text field: type what you're doing
+    /// right now and hit Return. It becomes the active task for this session
+    /// (created on the fly — no sheet, no required estimate) and every
+    /// focus session you log afterwards carries that description, category,
+    /// and timestamp straight into Reports → Accomplishments.
     private var activeTaskCard: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "target")
-                .foregroundStyle(.white.opacity(0.8))
+        VStack(alignment: .leading, spacing: 10) {
+            quickCaptureField
             if let task = store.activeTask {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(task.title)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    HStack(spacing: 8) {
-                        CategoryBadge(name: task.category)
-                        Text("\(task.completedPomodoros)/\(task.estimatedPomodoros) pomodoros")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.75))
+                Divider().opacity(0.14)
+                HStack(spacing: 10) {
+                    Image(systemName: "target")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
+                    Text("\(task.completedPomodoros)/\(task.estimatedPomodoros) pomodoros logged")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.75))
+                    Spacer()
+                    Button("Clear") {
+                        store.activeTaskId = nil
+                        draftText = ""
                     }
-                }
-                Spacer()
-                Button("Clear") { store.activeTaskId = nil }
                     .buttonStyle(.plain)
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(.white.opacity(0.7))
-            } else {
-                Text("No task selected — focusing freely.")
-                    .foregroundStyle(.white.opacity(0.75))
-                Spacer()
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -215,6 +220,72 @@ struct FocusView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.white.opacity(0.07))
         )
+        .onAppear {
+            draftText = store.activeTask?.title ?? ""
+            draftCategory = store.activeTask?.category ?? store.settings.categories.first ?? "Quick"
+        }
+        .onChange(of: store.activeTaskId) { _, _ in
+            draftText = store.activeTask?.title ?? ""
+            if let cat = store.activeTask?.category { draftCategory = cat }
+        }
+        .onChange(of: timer.phase) { _, newPhase in
+            // Prompt for fresh input when a new focus block begins and the
+            // field is empty — but never steal focus if something's typed.
+            if newPhase == .focus, draftText.trimmingCharacters(in: .whitespaces).isEmpty {
+                captureFocused = true
+            }
+        }
+    }
+
+    private var quickCaptureField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "pencil.line")
+                .foregroundStyle(.white.opacity(0.65))
+            TextField("What are you working on?", text: $draftText)
+                .textFieldStyle(.plain)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.white)
+                .focused($captureFocused)
+                .onSubmit(commitDraft)
+
+            Menu {
+                ForEach(allCategoryOptions, id: \.self) { cat in
+                    Button(cat) { draftCategory = cat }
+                }
+            } label: {
+                CategoryBadge(name: draftCategory.isEmpty ? "Quick" : draftCategory)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            Button(action: commitDraft) {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(
+                        draftText.trimmingCharacters(in: .whitespaces).isEmpty
+                            ? .white.opacity(0.3)
+                            : .white
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(draftText.trimmingCharacters(in: .whitespaces).isEmpty)
+            .help("Set as active task (Return)")
+        }
+    }
+
+    private var allCategoryOptions: [String] {
+        var cats = store.settings.categories
+        if !cats.contains("Quick") { cats.append("Quick") }
+        return cats
+    }
+
+    private func commitDraft() {
+        let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let cat = draftCategory.isEmpty ? (store.settings.categories.first ?? "Quick") : draftCategory
+        store.setActiveTask(title: trimmed, category: cat)
+        draftCategory = cat
+        captureFocused = false
     }
 
     // MARK: - Quick task list (today)

@@ -213,6 +213,7 @@ private struct TaskEditor: View {
         _category = State(initialValue: task?.category ?? "Work")
         _estimated = State(initialValue: task?.estimatedPomodoros ?? 1)
         _notes = State(initialValue: task?.notes ?? "")
+        _newCategory = State(initialValue: "")
     }
 
     var body: some View {
