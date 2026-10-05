@@ -2,7 +2,7 @@ import SwiftUI
 import Charts
 
 enum ReportPeriod: String, CaseIterable, Identifiable {
-    case day, week, month, quarter
+    case day, week, month, quarter, year
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -10,6 +10,7 @@ enum ReportPeriod: String, CaseIterable, Identifiable {
         case .week: return "Week"
         case .month: return "Month"
         case .quarter: return "Quarter"
+        case .year: return "Year"
         }
     }
     var bucketComponent: Calendar.Component {
@@ -17,6 +18,7 @@ enum ReportPeriod: String, CaseIterable, Identifiable {
         case .day: return .hour
         case .week, .month: return .day
         case .quarter: return .weekOfYear
+        case .year: return .month
         }
     }
     /// How the x-axis label should display each bucket
@@ -26,6 +28,23 @@ enum ReportPeriod: String, CaseIterable, Identifiable {
         case .week: return .dateTime.weekday(.abbreviated)
         case .month: return .dateTime.day().month(.abbreviated)
         case .quarter: return .dateTime.month(.abbreviated).day()
+        case .year: return .dateTime.month(.abbreviated)
+        }
+    }
+}
+
+/// Drives the single `.sheet(item:)` used by Reports → Accomplishments for
+/// adding, editing, and breaking down logged work entries.
+enum AccomplishmentSheet: Identifiable {
+    case editor(session: PomoSession, isNew: Bool)
+    case group(date: Date, title: String, category: String)
+
+    var id: String {
+        switch self {
+        case .editor(let session, let isNew):
+            return "editor-\(session.id)-\(isNew)"
+        case .group(let date, let title, let category):
+            return "group-\(date.timeIntervalSince1970)-\(title)-\(category)"
         }
     }
 }
@@ -33,6 +52,7 @@ enum ReportPeriod: String, CaseIterable, Identifiable {
 struct ReportsView: View {
     @EnvironmentObject var store: DataStore
     @State private var period: ReportPeriod = .week
+    @State private var sheet: AccomplishmentSheet?
 
     var body: some View {
         ScrollView {
@@ -44,11 +64,60 @@ struct ReportsView: View {
                     categoryChart
                     topTasks
                 }
+                accomplishmentsSection
                 allSessionsList
             }
             .padding(24)
             .frame(maxWidth: 1100)
             .frame(maxWidth: .infinity)
+        }
+        .sheet(item: $sheet) { item in
+            switch item {
+            case .editor(let session, let isNew):
+                SessionEditorSheet(
+                    session: session,
+                    isNew: isNew,
+                    onSave: { store.upsertSession($0) },
+                    onDelete: isNew ? nil : { store.deleteSession(session) }
+                )
+                .environmentObject(store)
+            case .group(let date, let title, let category):
+                SessionGroupSheet(
+                    date: date,
+                    title: title,
+                    category: category,
+                    onEdit: { session in sheet = .editor(session: session, isNew: false) },
+                    onAddMore: {
+                        sheet = .editor(session: blankDraft(date: date, title: title, category: category), isNew: true)
+                    }
+                )
+                .environmentObject(store)
+            }
+        }
+    }
+
+    /// A fresh, unsaved entry template for the "+" / "Add more time" flows.
+    private func blankDraft(date: Date, title: String = "", category: String? = nil) -> PomoSession {
+        PomoSession.manual(
+            title: title,
+            category: category ?? (store.settings.categories.first ?? "Quick"),
+            date: date,
+            minutes: 25
+        )
+    }
+
+    /// Resolves a tapped Accomplishments row to either a direct single-session
+    /// editor, or — if several sessions make up that total — a breakdown sheet.
+    private func openEntry(date: Date, title: String, category: String) {
+        let cal = Calendar.current
+        let matches = sessionsInRange.filter {
+            cal.isDate($0.startedAt, inSameDayAs: date) &&
+            $0.taskTitle == title && $0.category == category
+        }
+        if matches.count == 1, let only = matches.first {
+            sheet = .editor(session: only, isNew: false)
+        } else {
+            sheet = .group(date: date, title: title, category: category)
         }
     }
 
@@ -83,6 +152,11 @@ struct ReportsView: View {
             let start = cal.date(from: qComps)!
             let end = cal.date(byAdding: .month, value: 3, to: start)!.addingTimeInterval(-1)
             return start...end
+        case .year:
+            let comps = cal.dateComponents([.year], from: now)
+            let start = cal.date(from: comps)!
+            let end = cal.date(byAdding: .year, value: 1, to: start)!.addingTimeInterval(-1)
+            return start...end
         }
     }
 
@@ -106,7 +180,7 @@ struct ReportsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: 320)
+            .frame(maxWidth: 400)
         }
     }
 
@@ -172,6 +246,7 @@ struct ReportsView: View {
             case .hour: comps = [.year, .month, .day, .hour]
             case .day: comps = [.year, .month, .day]
             case .weekOfYear: comps = [.yearForWeekOfYear, .weekOfYear]
+            case .month: comps = [.year, .month]
             default: comps = [.year, .month, .day]
             }
             return cal.date(from: cal.dateComponents(comps, from: session.startedAt)) ?? session.startedAt
@@ -343,6 +418,164 @@ struct ReportsView: View {
         return Array(rows.prefix(8))
     }
 
+    // MARK: - Accomplishments journal
+
+    /// A human-readable rollup of what you typed into the quick-capture
+    /// field — grouped by day, then by task — for the selected period.
+    /// This is the "what did I actually get done this week/quarter/year"
+    /// view, distinct from the raw chronological session list below it.
+
+    private struct LogEntry: Identifiable {
+        let id = UUID()
+        let title: String
+        let category: String
+        let minutes: Double
+        let count: Int
+    }
+
+    private struct DayLog: Identifiable {
+        let id = UUID()
+        let date: Date
+        let entries: [LogEntry]
+        var totalMinutes: Double { entries.reduce(0) { $0 + $1.minutes } }
+        var totalCount: Int { entries.reduce(0) { $0 + $1.count } }
+    }
+
+    private func accomplishmentLog() -> [DayLog] {
+        let cal = Calendar.current
+        let byDay = Dictionary(grouping: sessionsInRange) { cal.startOfDay(for: $0.startedAt) }
+        var logs: [DayLog] = []
+        for (day, daySessions) in byDay {
+            let grouped = Dictionary(grouping: daySessions) { "\($0.taskTitle)|\($0.category)" }
+            var entries: [LogEntry] = []
+            for (_, items) in grouped {
+                guard let first = items.first else { continue }
+                let minutes = items.reduce(0.0) { $0 + $1.durationMinutes }
+                entries.append(LogEntry(title: first.taskTitle, category: first.category,
+                                        minutes: minutes, count: items.count))
+            }
+            entries.sort { $0.minutes > $1.minutes }
+            logs.append(DayLog(date: day, entries: entries))
+        }
+        return logs.sorted { $0.date > $1.date }
+    }
+
+    /// A short auto-generated narrative sentence summarizing the period.
+    private func highlightSummary() -> String {
+        let sessions = sessionsInRange
+        guard !sessions.isEmpty else {
+            return "No focus sessions recorded yet this \(period.label.lowercased())."
+        }
+        let totalMinutes = sessions.reduce(0.0) { $0 + $1.durationMinutes }
+        let distinctTasks = Set(sessions.map { $0.taskTitle }).count
+        let byCategory = Dictionary(grouping: sessions, by: { $0.category })
+
+        var text = "You logged \(sessions.count) pomodoro\(sessions.count == 1 ? "" : "s")" +
+                   " (\(formatMinutes(totalMinutes))) across \(distinctTasks) task\(distinctTasks == 1 ? "" : "s")" +
+                   " this \(period.label.lowercased())."
+
+        let categoryTotals: [(name: String, minutes: Double)] = byCategory.map { key, items in
+            (key, items.reduce(0.0) { $0 + $1.durationMinutes })
+        }
+        if byCategory.count > 1, let top = categoryTotals.max(by: { $0.minutes < $1.minutes }) {
+            let pct = Int((top.minutes / totalMinutes * 100).rounded())
+            text += " Most time went to \(top.name) (\(pct)%)."
+        }
+        return text
+    }
+
+    private func dayHeaderText(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        switch period {
+        case .day, .week:
+            return date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+        default:
+            return date.formatted(.dateTime.month(.abbreviated).day().year())
+        }
+    }
+
+    private var accomplishmentsSection: some View {
+        let logs = accomplishmentLog()
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Accomplishments")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text(highlightSummary())
+                        .font(.callout)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button {
+                    sheet = .editor(session: blankDraft(date: Date()), isNew: true)
+                } label: {
+                    Label("Log work", systemImage: "plus.circle.fill")
+                        .font(.callout.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(0.9))
+                .help("Add something you worked on — e.g. earlier today or another day this week")
+            }
+
+            if logs.isEmpty {
+                emptyChart
+            } else {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(logs) { log in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(dayHeaderText(log.date))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                Spacer()
+                                Text("\(log.totalCount) 🍅 • \(formatMinutes(log.totalMinutes))")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
+                            ForEach(log.entries) { entry in
+                                Button {
+                                    openEntry(date: log.date, title: entry.title, category: entry.category)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Circle()
+                                            .fill(Color.white.opacity(0.4))
+                                            .frame(width: 4, height: 4)
+                                        Text(entry.title)
+                                            .foregroundStyle(.white.opacity(0.92))
+                                            .lineLimit(1)
+                                        CategoryBadge(name: entry.category)
+                                        Spacer()
+                                        Text("\(entry.count) • \(formatMinutes(entry.minutes))")
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.white.opacity(0.7))
+                                        Image(systemName: "pencil")
+                                            .font(.caption2)
+                                            .foregroundStyle(.white.opacity(0.35))
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Edit this entry")
+                            }
+                            if log.id != logs.last?.id {
+                                Divider().opacity(0.12).padding(.top, 4)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.07))
+        )
+    }
+
     // MARK: - Recent sessions list
 
     private var allSessionsList: some View {
@@ -365,8 +598,8 @@ struct ReportsView: View {
             } else {
                 ForEach(Array(recent), id: \.id) { s in
                     HStack(spacing: 12) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.red.opacity(0.8))
+                        Image(systemName: s.isManual ? "pencil.circle.fill" : "checkmark.circle.fill")
+                            .foregroundStyle(s.isManual ? .white.opacity(0.6) : .red.opacity(0.8))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(s.taskTitle)
                                 .foregroundStyle(.white)
@@ -383,6 +616,11 @@ struct ReportsView: View {
                             .foregroundStyle(.white)
                     }
                     .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                    .contextMenu {
+                        Button("Edit") { sheet = .editor(session: s, isNew: false) }
+                        Button("Delete", role: .destructive) { store.deleteSession(s) }
+                    }
                     Divider().opacity(0.15)
                 }
             }

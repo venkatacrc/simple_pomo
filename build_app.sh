@@ -13,9 +13,20 @@ BUILD_NUM="1"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP_ROOT="${ROOT}/build/${APP_NAME}.app"
 
+# Without full Xcode.app, the Command Line Tools' newest SDK (macOS 27+) can't
+# expand SwiftUI's @State macros, and the default swiftbuild system fails to
+# initialize. Fall back to the macOS 26 SDK + native build system in that case.
+BUILD_FLAGS=()
+CLT_SDK_26="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
+if [[ "$(xcode-select -p)" == "/Library/Developer/CommandLineTools" && -d "${CLT_SDK_26}" ]]; then
+  export SDKROOT="${CLT_SDK_26}"
+  BUILD_FLAGS=(--build-system native)
+  echo "→ Command Line Tools only: building against $(basename "$(readlink "${CLT_SDK_26}" || echo "${CLT_SDK_26}")")"
+fi
+
 echo "→ Building SimplePomo (${CONFIG})"
-swift build -c "${CONFIG}"
-BIN_PATH="$(swift build -c "${CONFIG}" --show-bin-path)"
+swift build -c "${CONFIG}" "${BUILD_FLAGS[@]}"
+BIN_PATH="$(swift build -c "${CONFIG}" "${BUILD_FLAGS[@]}" --show-bin-path)"
 EXEC="${BIN_PATH}/${APP_NAME}"
 
 if [[ ! -x "${EXEC}" ]]; then
