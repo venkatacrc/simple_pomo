@@ -53,7 +53,7 @@ struct SettingsView: View {
             }
             Section("Durations (minutes)") {
                 Stepper("Pomodoro: \(store.settings.focusMinutes)",
-                        value: settingsBinding.focusMinutes, in: 1...90)
+                        value: settingsBinding.focusMinutes, in: 1...180)
                 Stepper("Short break: \(store.settings.shortBreakMinutes)",
                         value: settingsBinding.shortBreakMinutes, in: 1...30)
                 Stepper("Long break: \(store.settings.longBreakMinutes)",
