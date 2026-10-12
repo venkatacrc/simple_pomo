@@ -109,53 +109,113 @@ extension PomoSession {
 
 /// Named focus/break duration combos users can switch between with one tap.
 enum TimerPreset: String, CaseIterable, Identifiable, Codable {
-    case classic
-    case extended
-    case deepWork
+    case micro       // 5 / 1
+    case sprint      // 10 / 2
+    case short       // 15 / 3
+    case focus       // 20 / 5
+    case classic     // 25 / 5
+    case halfHour    // 30 / 5
+    case power       // 40 / 8
+    case threeQuarter // 45 / 10
+    case extended    // 50 / 10
+    case hour        // 60 / 10
+    case long        // 75 / 15
+    case deepWork    // 90 / 20
+    case marathon    // 120 / 25
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .micro: return "Micro"
+        case .sprint: return "Sprint"
+        case .short: return "Short"
+        case .focus: return "Focus"
         case .classic: return "Classic"
+        case .halfHour: return "Half Hour"
+        case .power: return "Power"
+        case .threeQuarter: return "¾ Hour"
         case .extended: return "Extended"
+        case .hour: return "Hour"
+        case .long: return "Long"
         case .deepWork: return "Deep Work"
+        case .marathon: return "Marathon"
         }
     }
 
     var subtitle: String {
-        "\(focusMinutes) / \(shortBreakMinutes)"
+        "\(focusMinutes)/\(shortBreakMinutes)"
     }
 
     var symbol: String {
         switch self {
+        case .micro: return "flame.fill"
+        case .sprint: return "bolt.fill"
+        case .short: return "hare.fill"
+        case .focus: return "eye.fill"
         case .classic: return "timer"
+        case .halfHour: return "clock.fill"
+        case .power: return "bolt.circle.fill"
+        case .threeQuarter: return "gauge.with.dots.needle.67percent"
         case .extended: return "hourglass"
+        case .hour: return "clock.badge.checkmark"
+        case .long: return "figure.walk"
         case .deepWork: return "brain.head.profile"
+        case .marathon: return "tortoise.fill"
         }
     }
 
     var focusMinutes: Int {
         switch self {
+        case .micro: return 5
+        case .sprint: return 10
+        case .short: return 15
+        case .focus: return 20
         case .classic: return 25
+        case .halfHour: return 30
+        case .power: return 40
+        case .threeQuarter: return 45
         case .extended: return 50
+        case .hour: return 60
+        case .long: return 75
         case .deepWork: return 90
+        case .marathon: return 120
         }
     }
 
     var shortBreakMinutes: Int {
         switch self {
+        case .micro: return 1
+        case .sprint: return 2
+        case .short: return 3
+        case .focus: return 5
         case .classic: return 5
+        case .halfHour: return 5
+        case .power: return 8
+        case .threeQuarter: return 10
         case .extended: return 10
+        case .hour: return 10
+        case .long: return 15
         case .deepWork: return 20
+        case .marathon: return 25
         }
     }
 
     var longBreakMinutes: Int {
         switch self {
+        case .micro: return 5
+        case .sprint: return 10
+        case .short: return 10
+        case .focus: return 15
         case .classic: return 15
+        case .halfHour: return 15
+        case .power: return 20
+        case .threeQuarter: return 20
         case .extended: return 20
+        case .hour: return 20
+        case .long: return 25
         case .deepWork: return 30
+        case .marathon: return 40
         }
     }
 }

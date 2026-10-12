@@ -32,39 +32,39 @@ struct FocusView: View {
 
     private var presetPicker: some View {
         let active = store.settings.activePreset
-        return HStack(spacing: 8) {
+        // Equal-width cells stretch across the full content width so the row
+        // doesn't leave empty space on the right.
+        return HStack(spacing: 6) {
             ForEach(TimerPreset.allCases) { preset in
                 let isActive = active == preset
                 Button {
                     applyPreset(preset)
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: preset.symbol)
-                            .font(.caption)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(preset.title)
-                                .font(.caption.weight(.semibold))
-                            Text(preset.subtitle)
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.65))
-                        }
+                    VStack(spacing: 2) {
+                        Text("\(preset.focusMinutes)")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                        Text("+\(preset.shortBreakMinutes)")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.65))
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
                     .background(
-                        Capsule().fill(
-                            isActive ? Color.white.opacity(0.24) : Color.white.opacity(0.06)
-                        )
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(isActive ? Color.white.opacity(0.24) : Color.white.opacity(0.06))
                     )
                     .overlay(
-                        Capsule().stroke(isActive ? Color.white.opacity(0.5) : .clear, lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(isActive ? Color.white.opacity(0.5) : .clear, lineWidth: 1)
                     )
                     .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
-                .help("\(preset.focusMinutes)m focus / \(preset.shortBreakMinutes)m break / \(preset.longBreakMinutes)m long break")
+                .help("\(preset.title): \(preset.focusMinutes)m focus / \(preset.shortBreakMinutes)m break / \(preset.longBreakMinutes)m long break")
             }
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func applyPreset(_ preset: TimerPreset) {
