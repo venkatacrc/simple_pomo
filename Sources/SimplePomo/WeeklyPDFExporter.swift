@@ -53,21 +53,9 @@ enum WeeklyPDFExporter {
             let end = cal.date(byAdding: .month, value: 1, to: start)!.addingTimeInterval(-1)
             return start...end
         case .quarter:
-            let comps = cal.dateComponents([.year, .month], from: date)
-            let month = comps.month ?? 1
-            let qStartMonth = ((month - 1) / 3) * 3 + 1
-            var qComps = DateComponents()
-            qComps.year = comps.year
-            qComps.month = qStartMonth
-            qComps.day = 1
-            let start = cal.date(from: qComps) ?? cal.startOfDay(for: date)
-            let end = cal.date(byAdding: .month, value: 3, to: start)!.addingTimeInterval(-1)
-            return start...end
+            return WalmartFiscal(now: date).currentQuarterRange
         case .year:
-            let comps = cal.dateComponents([.year], from: date)
-            let start = cal.date(from: comps) ?? cal.startOfDay(for: date)
-            let end = cal.date(byAdding: .year, value: 1, to: start)!.addingTimeInterval(-1)
-            return start...end
+            return WalmartFiscal(now: date).currentFiscalYearRange
         }
     }
 
@@ -75,6 +63,7 @@ enum WeeklyPDFExporter {
         let range = dateRange(for: period, containing: date)
         let start = range.lowerBound
         let cal = Calendar.current
+        let fiscal = WalmartFiscal(now: date)
         switch period {
         case .day:
             return start.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().year())
@@ -86,17 +75,15 @@ enum WeeklyPDFExporter {
         case .month:
             return start.formatted(.dateTime.month(.wide).year())
         case .quarter:
-            let month = cal.component(.month, from: start)
-            let q = ((month - 1) / 3) + 1
-            let year = cal.component(.year, from: start)
-            return "Q\(q) \(year)"
+            return fiscal.currentLongLabel
         case .year:
-            return "\(cal.component(.year, from: start))"
+            return "FY\(fiscal.fiscalYear)"
         }
     }
 
     private static func defaultFilename(period: ReportPeriod, range: ClosedRange<Date>) -> String {
         let start = range.lowerBound
+        let fiscal = WalmartFiscal(now: start)
         let fmt = DateFormatter()
         switch period {
         case .day:
@@ -109,13 +96,9 @@ enum WeeklyPDFExporter {
             fmt.dateFormat = "yyyy-MM"
             return "SimplePomo-Month-\(fmt.string(from: start)).pdf"
         case .quarter:
-            let month = Calendar.current.component(.month, from: start)
-            let q = ((month - 1) / 3) + 1
-            let year = Calendar.current.component(.year, from: start)
-            return "SimplePomo-Q\(q)-\(year).pdf"
+            return "SimplePomo-\(fiscal.currentLabel).pdf"
         case .year:
-            fmt.dateFormat = "yyyy"
-            return "SimplePomo-Year-\(fmt.string(from: start)).pdf"
+            return "SimplePomo-FY\(fiscal.fiscalYear).pdf"
         }
     }
 

@@ -66,49 +66,54 @@ struct ContentView: View {
                 Text("Simple Pomo")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.white)
+            }
+            .frame(minWidth: 140, alignment: .leading)
 
+            Spacer(minLength: 8)
+
+            VStack(spacing: 6) {
                 currentWeekBadge
-            }
-
-            Spacer()
-
-            Picker("", selection: $selectedTab) {
-                ForEach(Tab.allCases) { tab in
-                    Label(tab.label, systemImage: tab.symbol).tag(tab)
+                Picker("", selection: $selectedTab) {
+                    ForEach(Tab.allCases) { tab in
+                        Label(tab.label, systemImage: tab.symbol).tag(tab)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 440)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 440)
 
-            Spacer()
+            Spacer(minLength: 8)
 
-            HStack(spacing: 6) {
-                Image(systemName: "flame.fill")
-                    .foregroundStyle(.orange)
-                Text("\(todayPomodoroCount)")
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                Text("today")
-                    .foregroundStyle(.white.opacity(0.7))
-                    .font(.callout)
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "flame.fill")
+                        .foregroundStyle(.orange)
+                    Text("\(todayPomodoroCount)")
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                    Text("today")
+                        .foregroundStyle(.white.opacity(0.7))
+                        .font(.callout)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.white.opacity(0.12), in: Capsule())
+
+                Button {
+                    windows.enterMini(open: openWindow, dismiss: dismissWindow)
+                } label: {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.white.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Shrink to floating mini timer (⌘⇧M)")
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.white.opacity(0.12), in: Capsule())
-
-            Button {
-                windows.enterMini(open: openWindow, dismiss: dismissWindow)
-            } label: {
-                Image(systemName: "arrow.down.right.and.arrow.up.left")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.white.opacity(0.12), in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .help("Shrink to floating mini timer (⌘⇧M)")
+            .frame(minWidth: 140, alignment: .trailing)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
@@ -135,7 +140,7 @@ struct ContentView: View {
         }.count
     }
 
-    /// Shows the active calendar week next to the logo, e.g. "Week of Oct 20".
+    /// Week badge centered above the tab picker, e.g. "Week 44 · Oct 26–Nov 1".
     private var currentWeekBadge: some View {
         let cal = Calendar.current
         let comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())
@@ -144,18 +149,18 @@ struct ContentView: View {
         let weekNum = comps.weekOfYear ?? 0
         return HStack(spacing: 6) {
             Image(systemName: "calendar")
-                .font(.caption)
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Week \(weekNum)")
-                    .font(.caption.weight(.semibold))
-                Text("\(start.formatted(.dateTime.month(.abbreviated).day()))–\(end.formatted(.dateTime.month(.abbreviated).day()))")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.7))
-            }
+                .font(.caption2)
+            Text("Week \(weekNum)")
+                .font(.caption.weight(.semibold))
+            Text("·")
+                .foregroundStyle(.white.opacity(0.45))
+            Text("\(start.formatted(.dateTime.month(.abbreviated).day()))–\(end.formatted(.dateTime.month(.abbreviated).day()))")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.7))
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.vertical, 4)
         .background(.white.opacity(0.12), in: Capsule())
         .help("Current week: \(start.formatted(date: .abbreviated, time: .omitted)) – \(end.formatted(date: .abbreviated, time: .omitted))")
     }

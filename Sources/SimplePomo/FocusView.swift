@@ -14,7 +14,7 @@ struct FocusView: View {
                 presetPicker
                 phaseTabs
                 HStack(alignment: .top, spacing: 24) {
-                    SeasonalClockView(diameter: 260)
+                    SeasonalClockView(diameter: 280)
                         .frame(maxWidth: .infinity)
                     timerCard
                         .frame(maxWidth: .infinity)

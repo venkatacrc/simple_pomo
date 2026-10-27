@@ -151,21 +151,9 @@ struct ReportsView: View {
             let end = cal.date(byAdding: .month, value: 1, to: start)!.addingTimeInterval(-1)
             return start...end
         case .quarter:
-            let comps = cal.dateComponents([.year, .month], from: now)
-            let month = comps.month ?? 1
-            let qStartMonth = ((month - 1) / 3) * 3 + 1
-            var qComps = DateComponents()
-            qComps.year = comps.year
-            qComps.month = qStartMonth
-            qComps.day = 1
-            let start = cal.date(from: qComps)!
-            let end = cal.date(byAdding: .month, value: 3, to: start)!.addingTimeInterval(-1)
-            return start...end
+            return WalmartFiscal(now: now).currentQuarterRange
         case .year:
-            let comps = cal.dateComponents([.year], from: now)
-            let start = cal.date(from: comps)!
-            let end = cal.date(byAdding: .year, value: 1, to: start)!.addingTimeInterval(-1)
-            return start...end
+            return WalmartFiscal(now: now).currentFiscalYearRange
         }
     }
 
@@ -179,10 +167,22 @@ struct ReportsView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack {
-            Text("Reports")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(.white)
+        let fiscal = WalmartFiscal()
+        return HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Reports")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                if period == .quarter {
+                    Text(fiscal.currentLongLabel)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                } else if period == .year {
+                    Text("FY\(fiscal.fiscalYear)")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+            }
             Spacer()
             Picker("", selection: $period) {
                 ForEach(ReportPeriod.allCases) { Text($0.label).tag($0) }
@@ -214,22 +214,28 @@ struct ReportsView: View {
                         WeeklyPDFExporter.export(store: store, period: .month, containing: d)
                     }
                 }
-                Section("Quarter") {
-                    Button("This quarter") {
+                Section("Walmart Quarter") {
+                    Button("This quarter (\(fiscal.currentLabel))") {
                         WeeklyPDFExporter.export(store: store, period: .quarter, containing: Date())
                     }
                     Button("Last quarter") {
-                        let d = Calendar.current.date(byAdding: .month, value: -3, to: Date()) ?? Date()
-                        WeeklyPDFExporter.export(store: store, period: .quarter, containing: d)
+                        WeeklyPDFExporter.export(
+                            store: store,
+                            period: .quarter,
+                            containing: fiscal.dateInPreviousQuarter
+                        )
                     }
                 }
-                Section("Year") {
-                    Button("This year") {
+                Section("Walmart Fiscal Year") {
+                    Button("This year (FY\(fiscal.fiscalYear))") {
                         WeeklyPDFExporter.export(store: store, period: .year, containing: Date())
                     }
-                    Button("Last year") {
-                        let d = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
-                        WeeklyPDFExporter.export(store: store, period: .year, containing: d)
+                    Button("Last year (FY\(fiscal.fiscalYear - 1))") {
+                        WeeklyPDFExporter.export(
+                            store: store,
+                            period: .year,
+                            containing: fiscal.dateInPreviousFiscalYear
+                        )
                     }
                 }
                 Divider()
@@ -247,7 +253,7 @@ struct ReportsView: View {
                     .background(.white.opacity(0.12), in: Capsule())
             }
             .menuStyle(.borderlessButton)
-            .help("Export a PDF for this week, month, quarter, year, or a custom range")
+            .help("Export a PDF for this week, month, Walmart quarter/FY, or a custom range")
         }
         .sheet(isPresented: $showingPeriodPicker) {
             periodPickerSheet

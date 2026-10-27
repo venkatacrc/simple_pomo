@@ -132,13 +132,13 @@ struct SeasonalClockView: View {
         // 365-day dial, so per-minute updates are more than smooth enough.
         TimelineView(.periodic(from: .now, by: 60)) { context in
             let model = SeasonalClock(now: context.date)
-            VStack(spacing: 18) {
+            VStack(spacing: 14) {
                 header(model: model)
                 clockFace(model: model)
                     .frame(width: diameter, height: diameter)
                 footer(model: model)
             }
-            .padding(24)
+            .padding(28)
             .background(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(Color.white.opacity(0.08))
@@ -304,31 +304,29 @@ struct SeasonalClockView: View {
 
     // MARK: - Footer
 
+    /// Single compact row — season countdown left, Walmart quarter right —
+    /// so the Present card stays the same height as the timer card.
     private func footer(model: SeasonalClock) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Next")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.6))
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(model.nextSeason.pureColor)
-                        .frame(width: 8, height: 8)
-                    Text(model.nextSeason.rawValue.capitalized)
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.white)
-                }
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("in")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.6))
-                Text("\(model.daysUntilNextSeason) day\(model.daysUntilNextSeason == 1 ? "" : "s")")
-                    .font(.callout.weight(.semibold))
+        let fiscal = WalmartFiscal(now: model.now)
+        let seasonDays = model.daysUntilNextSeason
+        let quarterDays = fiscal.daysUntilNextQuarter
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(model.nextSeason.pureColor)
+                    .frame(width: 6, height: 6)
+                Text("\(model.nextSeason.rawValue.capitalized) in \(seasonDays) day\(seasonDays == 1 ? "" : "s")")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
+            Spacer(minLength: 4)
+            Text("\(fiscal.nextLabel) in \(quarterDays) day\(quarterDays == 1 ? "" : "s")")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
-        .padding(.horizontal, 6)
     }
 }
