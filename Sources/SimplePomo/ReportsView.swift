@@ -38,6 +38,7 @@ enum ReportPeriod: String, CaseIterable, Identifiable {
 enum AccomplishmentSheet: Identifiable {
     case editor(session: PomoSession, isNew: Bool)
     case group(date: Date, title: String, category: String)
+    case notes(title: String, category: String, taskId: UUID?)
 
     var id: String {
         switch self {
@@ -45,6 +46,8 @@ enum AccomplishmentSheet: Identifiable {
             return "editor-\(session.id)-\(isNew)"
         case .group(let date, let title, let category):
             return "group-\(date.timeIntervalSince1970)-\(title)-\(category)"
+        case .notes(let title, let category, let taskId):
+            return "notes-\(taskId?.uuidString ?? title)-\(category)"
         }
     }
 }
@@ -53,6 +56,9 @@ struct ReportsView: View {
     @EnvironmentObject var store: DataStore
     @State private var period: ReportPeriod = .week
     @State private var sheet: AccomplishmentSheet?
+    @State private var showingPeriodPicker = false
+    @State private var pdfAnchorDate = Date()
+    @State private var pdfExportPeriod: ReportPeriod = .week
 
     var body: some View {
         ScrollView {
@@ -92,6 +98,9 @@ struct ReportsView: View {
                     }
                 )
                 .environmentObject(store)
+            case .notes(let title, let category, let taskId):
+                TaskNotesSheet(taskTitle: title, category: category, taskId: taskId)
+                    .environmentObject(store)
             }
         }
     }
@@ -181,7 +190,99 @@ struct ReportsView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(maxWidth: 400)
+            Menu {
+                Section("Current view") {
+                    Button("Export \(period.label.lowercased()) (on-screen)") {
+                        WeeklyPDFExporter.export(store: store, period: period, containing: Date())
+                    }
+                }
+                Section("Week") {
+                    Button("This week") {
+                        WeeklyPDFExporter.export(store: store, period: .week, containing: Date())
+                    }
+                    Button("Last week") {
+                        let d = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: Date()) ?? Date()
+                        WeeklyPDFExporter.export(store: store, period: .week, containing: d)
+                    }
+                }
+                Section("Month") {
+                    Button("This month") {
+                        WeeklyPDFExporter.export(store: store, period: .month, containing: Date())
+                    }
+                    Button("Last month") {
+                        let d = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+                        WeeklyPDFExporter.export(store: store, period: .month, containing: d)
+                    }
+                }
+                Section("Quarter") {
+                    Button("This quarter") {
+                        WeeklyPDFExporter.export(store: store, period: .quarter, containing: Date())
+                    }
+                    Button("Last quarter") {
+                        let d = Calendar.current.date(byAdding: .month, value: -3, to: Date()) ?? Date()
+                        WeeklyPDFExporter.export(store: store, period: .quarter, containing: d)
+                    }
+                }
+                Section("Year") {
+                    Button("This year") {
+                        WeeklyPDFExporter.export(store: store, period: .year, containing: Date())
+                    }
+                    Button("Last year") {
+                        let d = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+                        WeeklyPDFExporter.export(store: store, period: .year, containing: d)
+                    }
+                }
+                Divider()
+                Button("Choose period & date…") {
+                    pdfExportPeriod = period
+                    pdfAnchorDate = Date()
+                    showingPeriodPicker = true
+                }
+            } label: {
+                Label("Export PDF", systemImage: "doc.richtext")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(0.12), in: Capsule())
+            }
+            .menuStyle(.borderlessButton)
+            .help("Export a PDF for this week, month, quarter, year, or a custom range")
         }
+        .sheet(isPresented: $showingPeriodPicker) {
+            periodPickerSheet
+        }
+    }
+
+    private var periodPickerSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Export PDF")
+                .font(.title3.weight(.semibold))
+            Picker("Period", selection: $pdfExportPeriod) {
+                ForEach(ReportPeriod.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            DatePicker("Date in period", selection: $pdfAnchorDate, displayedComponents: .date)
+                .datePickerStyle(.graphical)
+            Text(WeeklyPDFExporter.periodLabel(for: pdfExportPeriod, containing: pdfAnchorDate))
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { showingPeriodPicker = false }
+                Button("Export PDF") {
+                    WeeklyPDFExporter.export(
+                        store: store,
+                        period: pdfExportPeriod,
+                        containing: pdfAnchorDate
+                    )
+                    showingPeriodPicker = false
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 400)
     }
 
     // MARK: - Summary cards
@@ -431,6 +532,8 @@ struct ReportsView: View {
         let category: String
         let minutes: Double
         let count: Int
+        let notes: String
+        let taskId: UUID?
     }
 
     private struct DayLog: Identifiable {
@@ -439,6 +542,15 @@ struct ReportsView: View {
         let entries: [LogEntry]
         var totalMinutes: Double { entries.reduce(0) { $0 + $1.minutes } }
         var totalCount: Int { entries.reduce(0) { $0 + $1.count } }
+    }
+
+    private func notesForTask(title: String, taskId: UUID?) -> String {
+        if let taskId, let task = store.tasks.first(where: { $0.id == taskId }) {
+            return task.notesLog
+        }
+        return store.tasks.first {
+            $0.title.caseInsensitiveCompare(title) == .orderedSame
+        }?.notesLog ?? ""
     }
 
     private func accomplishmentLog() -> [DayLog] {
@@ -451,8 +563,16 @@ struct ReportsView: View {
             for (_, items) in grouped {
                 guard let first = items.first else { continue }
                 let minutes = items.reduce(0.0) { $0 + $1.durationMinutes }
-                entries.append(LogEntry(title: first.taskTitle, category: first.category,
-                                        minutes: minutes, count: items.count))
+                entries.append(LogEntry(
+                    title: first.taskTitle,
+                    category: first.category,
+                    minutes: minutes,
+                    count: items.count,
+                    notes: notesForTask(title: first.taskTitle, taskId: first.taskId),
+                    taskId: first.taskId ?? store.tasks.first {
+                        $0.title.caseInsensitiveCompare(first.taskTitle) == .orderedSame
+                    }?.id
+                ))
             }
             entries.sort { $0.minutes > $1.minutes }
             logs.append(DayLog(date: day, entries: entries))
@@ -537,29 +657,68 @@ struct ReportsView: View {
                                     .foregroundStyle(.white.opacity(0.6))
                             }
                             ForEach(log.entries) { entry in
-                                Button {
-                                    openEntry(date: log.date, title: entry.title, category: entry.category)
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Circle()
-                                            .fill(Color.white.opacity(0.4))
-                                            .frame(width: 4, height: 4)
-                                        Text(entry.title)
-                                            .foregroundStyle(.white.opacity(0.92))
-                                            .lineLimit(1)
-                                        CategoryBadge(name: entry.category)
-                                        Spacer()
-                                        Text("\(entry.count) • \(formatMinutes(entry.minutes))")
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundStyle(.white.opacity(0.7))
-                                        Image(systemName: "pencil")
-                                            .font(.caption2)
-                                            .foregroundStyle(.white.opacity(0.35))
+                                HStack(alignment: .top, spacing: 8) {
+                                    Button {
+                                        openEntry(date: log.date, title: entry.title, category: entry.category)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            HStack(spacing: 8) {
+                                                Circle()
+                                                    .fill(Color.white.opacity(0.4))
+                                                    .frame(width: 4, height: 4)
+                                                Text(entry.title)
+                                                    .foregroundStyle(.white.opacity(0.92))
+                                                    .lineLimit(1)
+                                                CategoryBadge(name: entry.category)
+                                                Spacer()
+                                                Text("\(entry.count) • \(formatMinutes(entry.minutes))")
+                                                    .font(.caption.monospacedDigit())
+                                                    .foregroundStyle(.white.opacity(0.7))
+                                                Image(systemName: "pencil")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.white.opacity(0.35))
+                                            }
+                                            if !entry.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                Text(entry.notes)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.white.opacity(0.55))
+                                                    .lineLimit(3)
+                                                    .padding(.leading, 12)
+                                            }
+                                        }
+                                        .contentShape(Rectangle())
                                     }
-                                    .contentShape(Rectangle())
+                                    .buttonStyle(.plain)
+                                    .help("Edit time / title for this entry")
+
+                                    Button {
+                                        sheet = .notes(
+                                            title: entry.title,
+                                            category: entry.category,
+                                            taskId: entry.taskId
+                                        )
+                                    } label: {
+                                        Image(systemName: entry.notes.isEmpty ? "note.text.badge.plus" : "note.text")
+                                            .font(.body)
+                                            .foregroundStyle(.white.opacity(0.75))
+                                            .frame(width: 28, height: 28)
+                                            .background(Circle().fill(Color.white.opacity(0.12)))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("View / append session notes")
                                 }
-                                .buttonStyle(.plain)
-                                .help("Edit this entry")
+                                .contextMenu {
+                                    Button("Edit entry") {
+                                        openEntry(date: log.date, title: entry.title, category: entry.category)
+                                    }
+                                    Button("Edit notes…") {
+                                        sheet = .notes(
+                                            title: entry.title,
+                                            category: entry.category,
+                                            taskId: entry.taskId
+                                        )
+                                    }
+                                }
                             }
                             if log.id != logs.last?.id {
                                 Divider().opacity(0.12).padding(.top, 4)

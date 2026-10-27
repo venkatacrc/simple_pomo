@@ -19,6 +19,7 @@ struct SessionEditorSheet: View {
     @State private var category: String
     @State private var date: Date
     @State private var minutes: Int
+    @State private var newNote: String = ""
 
     init(
         session: PomoSession,
@@ -34,6 +35,7 @@ struct SessionEditorSheet: View {
         _category = State(initialValue: session.category)
         _date = State(initialValue: session.startedAt)
         _minutes = State(initialValue: max(5, Int(session.durationMinutes.rounded())))
+        _newNote = State(initialValue: "")
     }
 
     var body: some View {
@@ -49,6 +51,8 @@ struct SessionEditorSheet: View {
                 DatePicker("Date", selection: $date, in: ...Date(), displayedComponents: .date)
                 Stepper("Duration: \(minutes) min (~\(pomodoroCountLabel) 🍅)",
                         value: $minutes, in: 5...480, step: 5)
+
+                notesSection
             }
             .formStyle(.grouped)
 
@@ -67,7 +71,55 @@ struct SessionEditorSheet: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 440, minHeight: 340)
+        .frame(minWidth: 460, minHeight: 480)
+    }
+
+    @ViewBuilder
+    private var notesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Session notes (append-only)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let task = linkedTask, !task.orderedNoteEntries.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(task.orderedNoteEntries) { entry in
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(entry.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(entry.text)
+                                    .font(.caption)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+                .frame(maxHeight: 100)
+            } else if linkedTask == nil {
+                Text("Notes are saved on the matching task after you save this entry.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            TextEditor(text: $newNote)
+                .frame(minHeight: 60)
+                .border(Color.secondary.opacity(0.2))
+            Text("New text is appended with a timestamp; earlier notes stay intact.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Prefer taskId, then fall back to title match.
+    private var linkedTask: PomoTask? {
+        if let id = original.taskId, let task = store.tasks.first(where: { $0.id == id }) {
+            return task
+        }
+        let trimmed = title.trimmingCharacters(in: .whitespaces)
+        return store.tasks.first {
+            $0.title.caseInsensitiveCompare(trimmed.isEmpty ? original.taskTitle : trimmed) == .orderedSame
+        }
     }
 
     private var categoryOptions: [String] {
@@ -90,7 +142,117 @@ struct SessionEditorSheet: View {
         updated.endedAt = date.addingTimeInterval(TimeInterval(minutes * 60))
         updated.isManual = true
         onSave(updated)
+
+        let noteText = newNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !noteText.isEmpty {
+            if let id = updated.taskId ?? linkedTask?.id {
+                store.appendNote(noteText, toTaskId: id)
+            } else if let match = store.tasks.first(where: {
+                $0.title.caseInsensitiveCompare(updated.taskTitle) == .orderedSame
+            }) {
+                store.appendNote(noteText, toTaskId: match.id)
+            } else {
+                // Create a lightweight task so notes have a home.
+                var task = PomoTask(title: updated.taskTitle, category: updated.category)
+                task.appendNote(noteText)
+                store.addTask(task)
+                updated.taskId = task.id
+                store.upsertSession(updated)
+            }
+        }
         dismiss()
+    }
+}
+
+// MARK: - Notes-only sheet (from Accomplishments)
+
+/// Focused append-only notes editor opened from an Accomplishments row.
+struct TaskNotesSheet: View {
+    @EnvironmentObject var store: DataStore
+    @Environment(\.dismiss) private var dismiss
+
+    let taskTitle: String
+    let category: String
+    let taskId: UUID?
+
+    @State private var newNote: String = ""
+
+    private var task: PomoTask? {
+        if let taskId, let t = store.tasks.first(where: { $0.id == taskId }) { return t }
+        return store.tasks.first {
+            $0.title.caseInsensitiveCompare(taskTitle) == .orderedSame &&
+            $0.category == category
+        } ?? store.tasks.first {
+            $0.title.caseInsensitiveCompare(taskTitle) == .orderedSame
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Notes")
+                    .font(.title3.weight(.semibold))
+                Text(taskTitle)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let task, !task.orderedNoteEntries.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(task.orderedNoteEntries) { entry in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(entry.text)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.secondary.opacity(0.08))
+                            )
+                        }
+                    }
+                }
+                .frame(minHeight: 120, maxHeight: 220)
+            } else {
+                Text("No notes yet for this task.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Add a note").font(.caption).foregroundStyle(.secondary)
+                TextEditor(text: $newNote)
+                    .frame(minHeight: 70)
+                    .border(Color.secondary.opacity(0.2))
+            }
+
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                Button("Add note") { appendAndKeepOpen() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(newNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 440, minHeight: 400)
+    }
+
+    private func appendAndKeepOpen() {
+        let trimmed = newNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if let id = task?.id {
+            store.appendNote(trimmed, toTaskId: id)
+        } else {
+            var t = PomoTask(title: taskTitle, category: category)
+            t.appendNote(trimmed)
+            store.addTask(t)
+        }
+        newNote = ""
     }
 }
 

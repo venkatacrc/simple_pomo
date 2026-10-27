@@ -5,6 +5,7 @@ struct FocusView: View {
     @EnvironmentObject var timer: PomodoroTimer
     @State private var draftText: String = ""
     @State private var draftCategory: String = ""
+    @State private var draftNotes: String = ""
     @FocusState private var captureFocused: Bool
 
     var body: some View {
@@ -207,11 +208,13 @@ struct FocusView: View {
                     Button("Clear") {
                         store.activeTaskId = nil
                         draftText = ""
+                        draftNotes = ""
                     }
                     .buttonStyle(.plain)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.white.opacity(0.7))
                 }
+                activeNotesEditor
             }
         }
         .padding(.horizontal, 16)
@@ -220,21 +223,107 @@ struct FocusView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.white.opacity(0.07))
         )
-        .onAppear {
-            draftText = store.activeTask?.title ?? ""
-            draftCategory = store.activeTask?.category ?? store.settings.categories.first ?? "Quick"
-        }
-        .onChange(of: store.activeTaskId) { _, _ in
-            draftText = store.activeTask?.title ?? ""
-            if let cat = store.activeTask?.category { draftCategory = cat }
-        }
+        .onAppear { syncDraftFromActiveTask() }
+        .onChange(of: store.activeTaskId) { _, _ in syncDraftFromActiveTask() }
         .onChange(of: timer.phase) { _, newPhase in
+            // Flush any pending note when a focus block ends so it isn't lost.
+            if newPhase != .focus {
+                appendDraftNote()
+            }
             // Prompt for fresh input when a new focus block begins and the
             // field is empty — but never steal focus if something's typed.
             if newPhase == .focus, draftText.trimmingCharacters(in: .whitespaces).isEmpty {
                 captureFocused = true
             }
         }
+    }
+
+    private var activeNotesEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "note.text")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.55))
+                Text("Session notes")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.55))
+                Text("(append-only)")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.4))
+                Spacer()
+            }
+
+            if let task = store.activeTask, !task.orderedNoteEntries.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(task.orderedNoteEntries) { entry in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.cyan.opacity(0.85))
+                                Text(entry.text)
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.8))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Color.white.opacity(0.06))
+                            )
+                        }
+                    }
+                }
+                .frame(maxHeight: 120)
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                TextEditor(text: $draftNotes)
+                    .font(.callout)
+                    .scrollContentBackground(.hidden)
+                    .foregroundStyle(.white)
+                    .frame(minHeight: 48, maxHeight: 80)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.black.opacity(0.25))
+                    )
+                    .overlay(alignment: .topLeading) {
+                        if draftNotes.isEmpty {
+                            Text("Add a note for this session…")
+                                .font(.callout)
+                                .foregroundStyle(.white.opacity(0.35))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 14)
+                                .allowsHitTesting(false)
+                        }
+                    }
+
+                Button(action: appendDraftNote) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(
+                            draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? .white.opacity(0.3) : .white
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help("Append note (keeps previous days' notes)")
+            }
+        }
+    }
+
+    private func appendDraftNote() {
+        guard store.appendActiveTaskNote(draftNotes) else { return }
+        draftNotes = ""
+    }
+
+    private func syncDraftFromActiveTask() {
+        draftText = store.activeTask?.title ?? ""
+        draftCategory = store.activeTask?.category ?? store.settings.categories.first ?? "Quick"
+        // Never load history into the draft — draft is only for new appends.
+        draftNotes = ""
     }
 
     private var quickCaptureField: some View {

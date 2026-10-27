@@ -41,7 +41,11 @@ final class DataStore: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let store = try decoder.decode(StoreData.self, from: data)
-            self.tasks = store.tasks
+            self.tasks = store.tasks.map { task in
+                var t = task
+                t.migrateLegacyNotesIfNeeded()
+                return t
+            }
             self.sessions = store.sessions
             self.settings = store.settings
         } catch {
@@ -143,6 +147,98 @@ final class DataStore: ObservableObject {
         tasks.append(task)
         activeTaskId = task.id
         save()
+    }
+
+    /// Append a dated note to the active task. Never overwrites prior notes.
+    @discardableResult
+    func appendActiveTaskNote(_ text: String) -> Bool {
+        guard let id = activeTaskId,
+              let idx = tasks.firstIndex(where: { $0.id == id }) else { return false }
+        let before = tasks[idx].noteEntries.count
+        tasks[idx].appendNote(text)
+        guard tasks[idx].noteEntries.count > before else { return false }
+        save()
+        return true
+    }
+
+    /// Append a dated note to any task by id.
+    func appendNote(_ text: String, toTaskId id: UUID) {
+        guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
+        tasks[idx].appendNote(text)
+        save()
+    }
+
+    func planTask(_ task: PomoTask, from start: Date, until end: Date? = nil) {
+        var t = task
+        let cal = Calendar.current
+        let startDay = cal.startOfDay(for: start)
+        let endDay = cal.startOfDay(for: end ?? start)
+        t.isPlanned = true
+        t.plannedFor = min(startDay, endDay)
+        t.plannedUntil = max(startDay, endDay)
+        if t.plannedFor == t.plannedUntil {
+            t.plannedUntil = nil  // single-day stays compact in storage
+        }
+        if let idx = tasks.firstIndex(where: { $0.id == t.id }) {
+            tasks[idx] = t
+        } else {
+            tasks.append(t)
+        }
+        save()
+    }
+
+    /// Convenience for a single calendar day.
+    func planTask(_ task: PomoTask, for day: Date) {
+        planTask(task, from: day, until: day)
+    }
+
+    func unplanTask(_ task: PomoTask) {
+        guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        tasks[idx].isPlanned = false
+        tasks[idx].plannedFor = nil
+        tasks[idx].plannedUntil = nil
+        save()
+    }
+
+    /// Tasks whose plan spans this calendar day.
+    func plannedTasks(on day: Date) -> [PomoTask] {
+        tasks.filter { $0.isPlanned && !$0.isArchived && $0.isPlanned(on: day) }
+            .sorted { ($0.plannedFor ?? .distantPast) < ($1.plannedFor ?? .distantPast) }
+    }
+
+    /// Tasks whose plan overlaps the given range (e.g. a week).
+    func plannedTasks(in range: ClosedRange<Date>) -> [PomoTask] {
+        let cal = Calendar.current
+        let rangeStart = cal.startOfDay(for: range.lowerBound)
+        let rangeEnd = cal.startOfDay(for: range.upperBound)
+        return tasks.filter { task in
+            guard task.isPlanned, !task.isArchived, let span = task.plannedDayRange else { return false }
+            return span.lowerBound <= rangeEnd && span.upperBound >= rangeStart
+        }
+        .sorted {
+            ($0.plannedFor ?? .distantPast, $0.title) < ($1.plannedFor ?? .distantPast, $1.title)
+        }
+    }
+
+    /// Focus minutes logged for a task (by id or matching title) in a date range.
+    func focusMinutes(for task: PomoTask, in range: ClosedRange<Date>) -> Double {
+        sessions
+            .filter {
+                $0.phase == .focus &&
+                $0.startedAt >= range.lowerBound && $0.startedAt <= range.upperBound &&
+                ($0.taskId == task.id ||
+                 $0.taskTitle.caseInsensitiveCompare(task.title) == .orderedSame)
+            }
+            .reduce(0.0) { $0 + $1.durationMinutes }
+    }
+
+    func focusSessionCount(for task: PomoTask, in range: ClosedRange<Date>) -> Int {
+        sessions.filter {
+            $0.phase == .focus &&
+            $0.startedAt >= range.lowerBound && $0.startedAt <= range.upperBound &&
+            ($0.taskId == task.id ||
+             $0.taskTitle.caseInsensitiveCompare(task.title) == .orderedSame)
+        }.count
     }
 
     // MARK: - Sessions

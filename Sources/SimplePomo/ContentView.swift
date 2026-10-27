@@ -9,12 +9,13 @@ struct ContentView: View {
     @State private var selectedTab: Tab = .focus
 
     enum Tab: String, Hashable, CaseIterable, Identifiable {
-        case focus, tasks, reports
+        case focus, tasks, plan, reports
         var id: String { rawValue }
         var label: String {
             switch self {
             case .focus: return "Focus"
             case .tasks: return "Tasks"
+            case .plan: return "Plan"
             case .reports: return "Reports"
             }
         }
@@ -22,6 +23,7 @@ struct ContentView: View {
             switch self {
             case .focus: return "timer"
             case .tasks: return "checklist"
+            case .plan: return "calendar"
             case .reports: return "chart.bar.xaxis"
             }
         }
@@ -57,13 +59,15 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 16) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: "leaf.circle.fill")
                     .font(.title2)
                     .foregroundStyle(.white)
                 Text("Simple Pomo")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.white)
+
+                currentWeekBadge
             }
 
             Spacer()
@@ -75,7 +79,7 @@ struct ContentView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: 360)
+            .frame(maxWidth: 440)
 
             Spacer()
 
@@ -117,6 +121,8 @@ struct ContentView: View {
             FocusView()
         case .tasks:
             TaskListView()
+        case .plan:
+            PlanView()
         case .reports:
             ReportsView()
         }
@@ -127,5 +133,30 @@ struct ContentView: View {
         return store.sessions.filter {
             $0.phase == .focus && cal.isDateInToday($0.startedAt)
         }.count
+    }
+
+    /// Shows the active calendar week next to the logo, e.g. "Week of Oct 20".
+    private var currentWeekBadge: some View {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())
+        let start = cal.date(from: comps) ?? Date()
+        let end = cal.date(byAdding: .day, value: 6, to: start) ?? start
+        let weekNum = comps.weekOfYear ?? 0
+        return HStack(spacing: 6) {
+            Image(systemName: "calendar")
+                .font(.caption)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Week \(weekNum)")
+                    .font(.caption.weight(.semibold))
+                Text("\(start.formatted(.dateTime.month(.abbreviated).day()))–\(end.formatted(.dateTime.month(.abbreviated).day()))")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.white.opacity(0.12), in: Capsule())
+        .help("Current week: \(start.formatted(date: .abbreviated, time: .omitted)) – \(end.formatted(date: .abbreviated, time: .omitted))")
     }
 }

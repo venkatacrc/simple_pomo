@@ -112,6 +112,7 @@ struct TaskListView: View {
 // MARK: - Task row
 
 private struct TaskRow: View {
+    @EnvironmentObject var store: DataStore
     let task: PomoTask
     let isActive: Bool
     let onSelect: () -> Void
@@ -129,14 +130,29 @@ private struct TaskRow: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(task.title)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.white)
-                    .strikethrough(task.isCompleted)
+                HStack(spacing: 6) {
+                    Text(task.title)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.white)
+                        .strikethrough(task.isCompleted)
+                    if task.isPlanned {
+                        Image(systemName: "calendar")
+                            .font(.caption2)
+                            .foregroundStyle(.cyan)
+                            .help({
+                                guard let range = task.plannedDayRange else { return "Planned" }
+                                let fmt = Date.FormatStyle().month(.abbreviated).day()
+                                if Calendar.current.isDate(range.lowerBound, inSameDayAs: range.upperBound) {
+                                    return "Planned for \(range.lowerBound.formatted(fmt))"
+                                }
+                                return "Planned \(range.lowerBound.formatted(fmt))–\(range.upperBound.formatted(fmt))"
+                            }())
+                    }
+                }
                 HStack(spacing: 8) {
                     CategoryBadge(name: task.category)
-                    if !task.notes.isEmpty {
-                        Text(task.notes)
+                    if !task.notesLog.isEmpty {
+                        Text(task.notesLog)
                             .lineLimit(1)
                             .foregroundStyle(.white.opacity(0.6))
                             .font(.caption)
@@ -167,6 +183,11 @@ private struct TaskRow: View {
 
             Menu {
                 Button("Edit", action: onEdit)
+                if task.isPlanned {
+                    Button("Remove from plan") { store.unplanTask(task) }
+                } else {
+                    Button("Add to today's plan") { store.planTask(task, for: Date()) }
+                }
                 Button("Delete", role: .destructive, action: onDelete)
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -187,6 +208,11 @@ private struct TaskRow: View {
         )
         .contextMenu {
             Button("Edit", action: onEdit)
+            if task.isPlanned {
+                Button("Remove from plan") { store.unplanTask(task) }
+            } else {
+                Button("Add to today's plan") { store.planTask(task, for: Date()) }
+            }
             Button("Delete", role: .destructive, action: onDelete)
         }
     }
@@ -203,7 +229,7 @@ private struct TaskEditor: View {
     @State private var title: String
     @State private var category: String
     @State private var estimated: Int
-    @State private var notes: String
+    @State private var newNote: String = ""
     @State private var newCategory: String = ""
 
     init(task: PomoTask?, onSave: @escaping (PomoTask) -> Void) {
@@ -212,7 +238,7 @@ private struct TaskEditor: View {
         _title = State(initialValue: task?.title ?? "")
         _category = State(initialValue: task?.category ?? "Work")
         _estimated = State(initialValue: task?.estimatedPomodoros ?? 1)
-        _notes = State(initialValue: task?.notes ?? "")
+        _newNote = State(initialValue: "")
         _newCategory = State(initialValue: "")
     }
 
@@ -242,11 +268,31 @@ private struct TaskEditor: View {
                     .disabled(newCategory.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 Stepper("Estimated pomodoros: \(estimated)", value: $estimated, in: 1...20)
-                VStack(alignment: .leading) {
-                    Text("Notes").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $notes)
-                        .frame(minHeight: 80)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Notes (append-only)").font(.caption).foregroundStyle(.secondary)
+                    if let original, !original.orderedNoteEntries.isEmpty {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(original.orderedNoteEntries) { entry in
+                                    Text("[\(entry.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))] \(entry.text)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 90)
+                    } else if let original, !original.notes.isEmpty {
+                        Text(original.notes)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    TextEditor(text: $newNote)
+                        .frame(minHeight: 60)
                         .border(Color.secondary.opacity(0.2))
+                    Text("New text is appended with a timestamp; prior notes are kept.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)
@@ -260,7 +306,7 @@ private struct TaskEditor: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 460, minHeight: 420)
+        .frame(minWidth: 460, minHeight: 460)
     }
 
     private var allCategories: [String] {
@@ -274,7 +320,7 @@ private struct TaskEditor: View {
         t.title = title.trimmingCharacters(in: .whitespaces)
         t.category = category
         t.estimatedPomodoros = estimated
-        t.notes = notes
+        t.appendNote(newNote)
         onSave(t)
         dismiss()
     }

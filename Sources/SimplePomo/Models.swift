@@ -35,6 +35,16 @@ enum Phase: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Task note (append-only)
+
+/// One dated note on a task. Entries are never overwritten — new session notes
+/// are always appended so multi-day work keeps a full history.
+struct TaskNoteEntry: Identifiable, Codable, Equatable, Hashable {
+    var id: UUID = UUID()
+    var text: String
+    var createdAt: Date = Date()
+}
+
 // MARK: - Task
 
 struct PomoTask: Identifiable, Codable, Equatable, Hashable {
@@ -43,10 +53,94 @@ struct PomoTask: Identifiable, Codable, Equatable, Hashable {
     var category: String
     var estimatedPomodoros: Int = 1
     var completedPomodoros: Int = 0
+    /// Legacy flat notes string. Kept in sync with `noteEntries` for older
+    /// report/PDF paths. Prefer `noteEntries` / `notesLog` for new code.
     var notes: String = ""
+    /// Append-only session notes with timestamps.
+    var noteEntries: [TaskNoteEntry] = []
     var isCompleted: Bool = false
     var isArchived: Bool = false
     var createdAt: Date = Date()
+    /// First calendar day this task is planned for (inclusive).
+    var plannedFor: Date? = nil
+    /// Last calendar day this task is planned for (inclusive). `nil` means
+    /// a single-day plan on `plannedFor` only.
+    var plannedUntil: Date? = nil
+    /// True when the user explicitly added this to their plan (vs. ad-hoc focus).
+    var isPlanned: Bool = false
+
+    /// Inclusive day span for planning. Single-day tasks return one date.
+    var plannedDayRange: ClosedRange<Date>? {
+        guard isPlanned, let start = plannedFor.map({ Calendar.current.startOfDay(for: $0) }) else {
+            return nil
+        }
+        let end = Calendar.current.startOfDay(for: plannedUntil ?? start)
+        return start <= end ? start...end : end...start
+    }
+
+    func isPlanned(on day: Date) -> Bool {
+        guard let range = plannedDayRange else { return false }
+        let d = Calendar.current.startOfDay(for: day)
+        return range.contains(d)
+    }
+
+    /// Human-readable log used by Reports and PDF export.
+    var notesLog: String {
+        let entries = orderedNoteEntries
+        if entries.isEmpty { return notes }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return entries.map { "[\(formatter.string(from: $0.createdAt))] \($0.text)" }
+            .joined(separator: "\n")
+    }
+
+    var orderedNoteEntries: [TaskNoteEntry] {
+        noteEntries.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// Append a new dated note. Never replaces earlier entries.
+    mutating func appendNote(_ text: String, at date: Date = Date()) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        noteEntries.append(TaskNoteEntry(text: trimmed, createdAt: date))
+        notes = notesLog
+    }
+
+    /// If we only have the legacy `notes` string, seed a single entry once so
+    /// history is preserved going forward.
+    mutating func migrateLegacyNotesIfNeeded() {
+        guard noteEntries.isEmpty else { return }
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        noteEntries = [TaskNoteEntry(text: trimmed, createdAt: createdAt)]
+    }
+}
+
+extension PomoTask {
+    private enum CodingKeys: String, CodingKey {
+        case id, title, category, estimatedPomodoros, completedPomodoros
+        case notes, noteEntries, isCompleted, isArchived, createdAt
+        case plannedFor, plannedUntil, isPlanned
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        category = try c.decode(String.self, forKey: .category)
+        estimatedPomodoros = try c.decodeIfPresent(Int.self, forKey: .estimatedPomodoros) ?? 1
+        completedPomodoros = try c.decodeIfPresent(Int.self, forKey: .completedPomodoros) ?? 0
+        notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        noteEntries = try c.decodeIfPresent([TaskNoteEntry].self, forKey: .noteEntries) ?? []
+        isCompleted = try c.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
+        isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        plannedFor = try c.decodeIfPresent(Date.self, forKey: .plannedFor)
+        plannedUntil = try c.decodeIfPresent(Date.self, forKey: .plannedUntil)
+        isPlanned = try c.decodeIfPresent(Bool.self, forKey: .isPlanned) ?? false
+        migrateLegacyNotesIfNeeded()
+    }
 }
 
 // MARK: - Session record
