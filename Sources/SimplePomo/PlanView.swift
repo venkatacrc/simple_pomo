@@ -233,12 +233,13 @@ struct PlanView: View {
         let status: Status
 
         enum Status: String {
-            case done, partial, missed, unplanned
+            case done, partial, missed, upcoming, unplanned
             var label: String {
                 switch self {
                 case .done: return "Done"
                 case .partial: return "Partial"
                 case .missed: return "Missed"
+                case .upcoming: return "Upcoming"
                 case .unplanned: return "Unplanned"
                 }
             }
@@ -247,10 +248,26 @@ struct PlanView: View {
                 case .done: return .green
                 case .partial: return .orange
                 case .missed: return .red.opacity(0.85)
+                case .upcoming: return .white.opacity(0.75)
                 case .unplanned: return .cyan
                 }
             }
         }
+    }
+
+    /// Missed only after the planned days have passed with no work.
+    /// Events still ahead (today or later) stay Upcoming.
+    private func status(for task: PomoTask, sessions: Int, minutes: Double) -> ComparisonRow.Status {
+        if task.isCompleted || sessions >= max(task.estimatedPomodoros, 1) {
+            return .done
+        }
+        if sessions > 0 || minutes > 0 {
+            return .partial
+        }
+        if task.planWindowIsStillOpen() {
+            return .upcoming
+        }
+        return .missed
     }
 
     private var comparisonRows: [ComparisonRow] {
@@ -261,14 +278,7 @@ struct PlanView: View {
         for task in plannedThisWeek {
             let sessions = store.focusSessionCount(for: task, in: range)
             let minutes = store.focusMinutes(for: task, in: range)
-            let status: ComparisonRow.Status
-            if task.isCompleted || sessions >= max(task.estimatedPomodoros, 1) {
-                status = .done
-            } else if sessions > 0 || minutes > 0 {
-                status = .partial
-            } else {
-                status = .missed
-            }
+            let status = status(for: task, sessions: sessions, minutes: minutes)
             rows.append(ComparisonRow(
                 id: task.id,
                 title: task.title,
@@ -315,8 +325,9 @@ struct PlanView: View {
         switch s {
         case .missed: return 0
         case .partial: return 1
-        case .done: return 2
-        case .unplanned: return 3
+        case .upcoming: return 2
+        case .done: return 3
+        case .unplanned: return 4
         }
     }
 
@@ -325,6 +336,7 @@ struct PlanView: View {
         let plannedCount = rows.filter(\.planned).count
         let doneCount = rows.filter { $0.status == .done }.count
         let missedCount = rows.filter { $0.status == .missed }.count
+        let upcomingCount = rows.filter { $0.status == .upcoming }.count
         let unplannedCount = rows.filter { $0.status == .unplanned }.count
 
         return VStack(alignment: .leading, spacing: 12) {
@@ -333,7 +345,7 @@ struct PlanView: View {
                     .font(.headline)
                     .foregroundStyle(.white)
                 Spacer()
-                Text("\(doneCount)/\(plannedCount) planned done · \(missedCount) missed · \(unplannedCount) unplanned")
+                Text("\(doneCount)/\(plannedCount) planned done · \(upcomingCount) upcoming · \(missedCount) missed · \(unplannedCount) unplanned")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.65))
             }
@@ -370,8 +382,8 @@ struct PlanView: View {
             Text("Plan 🍅").frame(width: 88)
             Text("Done").frame(width: 50)
             Text("Time").frame(width: 60)
-            Text("Status").frame(width: 72, alignment: .trailing)
-            Text("").frame(width: 64)
+            Text("Status").frame(width: 78, alignment: .trailing)
+            Text("").frame(width: 168)
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.white.opacity(0.5))
@@ -462,23 +474,37 @@ struct PlanView: View {
             Text(row.status.label)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(row.status.tint)
-                .frame(width: 72, alignment: .trailing)
+                .frame(width: 78, alignment: .trailing)
 
-            if row.planned, task != nil {
-                Button {
-                    startWorking(onTaskId: row.id)
-                } label: {
-                    Label(isActive ? "Active" : "Start", systemImage: isActive ? "target" : "play.fill")
-                        .font(.caption.weight(.semibold))
-                        .labelStyle(.titleAndIcon)
+            if row.planned, let task {
+                HStack(spacing: 4) {
+                    if task.isCompleted {
+                        Button("Undo") { markDone(task, completed: false) }
+                            .buttonStyle(.bordered)
+                            .tint(.white.opacity(0.35))
+                            .help("Mark this planned task as not done")
+                    } else {
+                        Button("Mark Done") { markDone(task, completed: true) }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green.opacity(0.55))
+                            .help("Mark this planned task done even if no pomodoros were logged")
+                    }
+                    Button {
+                        startWorking(onTaskId: row.id)
+                    } label: {
+                        Label(isActive ? "Active" : "Start", systemImage: isActive ? "target" : "play.fill")
+                            .font(.caption.weight(.semibold))
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(isActive ? .yellow.opacity(0.35) : .white.opacity(0.22))
+                    .help(isActive ? "Already the active Focus task" : "Pick up this planned task on the Focus tab")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(isActive ? .yellow.opacity(0.35) : .white.opacity(0.22))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
-                .frame(width: 64)
-                .help(isActive ? "Already the active Focus task" : "Pick up this planned task on the Focus tab")
+                .frame(width: 168, alignment: .trailing)
             } else {
-                Color.clear.frame(width: 64)
+                Color.clear.frame(width: 168)
             }
         }
         .font(.callout)
@@ -493,13 +519,17 @@ struct PlanView: View {
                 Button("Edit plan…") { editingTask = task }
                 Button("Start working") { startWorking(onTaskId: task.id) }
                 Button("Remove from plan") { store.unplanTask(task) }
-                Button("Mark completed") {
-                    var t = task
-                    t.isCompleted = true
-                    store.updateTask(t)
+                Button(task.isCompleted ? "Mark not done" : "Mark Done") {
+                    markDone(task, completed: !task.isCompleted)
                 }
             }
         }
+    }
+
+    private func markDone(_ task: PomoTask, completed: Bool) {
+        var t = task
+        t.isCompleted = completed
+        store.updateTask(t)
     }
 
     private func adjustEstimate(_ task: PomoTask, by delta: Int) {

@@ -84,6 +84,14 @@ struct PomoTask: Identifiable, Codable, Equatable, Hashable {
         return range.contains(d)
     }
 
+    /// True while the planned window has not ended yet (today is on or before
+    /// the last planned day). Those tasks are still ahead, not missed.
+    func planWindowIsStillOpen(asOf date: Date = Date()) -> Bool {
+        guard let end = plannedDayRange?.upperBound else { return false }
+        let cal = Calendar.current
+        return cal.startOfDay(for: end) >= cal.startOfDay(for: date)
+    }
+
     /// Human-readable log used by Reports and PDF export.
     var notesLog: String {
         let entries = orderedNoteEntries

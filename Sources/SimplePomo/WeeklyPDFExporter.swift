@@ -228,6 +228,8 @@ enum WeeklyPDFExporter {
                 status = "Done"
             } else if sessions > 0 {
                 status = "Partial"
+            } else if task.planWindowIsStillOpen() {
+                status = "Upcoming"
             } else {
                 status = "Missed"
             }
