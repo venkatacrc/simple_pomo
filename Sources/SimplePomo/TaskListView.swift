@@ -6,6 +6,7 @@ struct TaskListView: View {
     @State private var editingTask: PomoTask?
     @State private var filterCategory: String = "All"
     @State private var showCompleted: Bool = false
+    @State private var notesTask: PomoTask?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,13 +26,24 @@ struct TaskListView: View {
             }
             .environmentObject(store)
         }
+        .sheet(item: $notesTask) { task in
+            TaskNotesSheet(taskTitle: task.title, category: task.category, taskId: task.id)
+                .environmentObject(store)
+        }
+        .onChange(of: store.settings.activeArea) { _, _ in
+            filterCategory = "All"
+        }
     }
+
+    private var area: LifeArea { store.settings.activeArea }
 
     private var categories: [String] {
         var seen = Set<String>()
         var result: [String] = ["All"]
-        for t in store.tasks where !seen.contains(t.category) && !t.category.isEmpty {
-            seen.insert(t.category)
+        for name in store.settings.categories(for: area) where seen.insert(name).inserted {
+            result.append(name)
+        }
+        for t in store.tasks where t.area == area && !t.category.isEmpty && seen.insert(t.category).inserted {
             result.append(t.category)
         }
         return result
@@ -39,7 +51,7 @@ struct TaskListView: View {
 
     private var filteredTasks: [PomoTask] {
         store.tasks
-            .filter { !$0.isArchived }
+            .filter { !$0.isArchived && $0.area == area }
             .filter { showCompleted || !$0.isCompleted }
             .filter { filterCategory == "All" || $0.category == filterCategory }
             .sorted { ($0.isCompleted ? 1 : 0, $0.createdAt) < ($1.isCompleted ? 1 : 0, $1.createdAt) }
@@ -47,7 +59,7 @@ struct TaskListView: View {
 
     private var toolbar: some View {
         HStack {
-            Text("Tasks")
+            Text("\(store.settings.activeArea.label) tasks")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
             Spacer()
@@ -81,6 +93,7 @@ struct TaskListView: View {
                                 onSelect: { store.activeTaskId = store.activeTaskId == task.id ? nil : task.id },
                                 onToggle: { store.toggleCompleted(task) },
                                 onEdit: { editingTask = task },
+                                onNotes: { notesTask = task },
                                 onDelete: { store.deleteTask(task) })
                     }
                 }
@@ -96,10 +109,10 @@ struct TaskListView: View {
             Image(systemName: "tray")
                 .font(.system(size: 44))
                 .foregroundStyle(.white.opacity(0.4))
-            Text("No tasks yet")
+            Text("No \(store.settings.activeArea.label.lowercased()) tasks")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
-            Text("Add a task to estimate and track your pomodoros.")
+            Text("Tasks you add here stay in \(store.settings.activeArea.label). Switch the header to see the other list.")
                 .foregroundStyle(.white.opacity(0.65))
             Button("Add your first task") { showingAdd = true }
                 .padding(.top, 4)
@@ -118,6 +131,7 @@ private struct TaskRow: View {
     let onSelect: () -> Void
     let onToggle: () -> Void
     let onEdit: () -> Void
+    let onNotes: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -173,6 +187,14 @@ private struct TaskRow: View {
             .padding(.vertical, 5)
             .background(Capsule().fill(Color.white.opacity(0.1)))
 
+            Button(action: onNotes) {
+                Image(systemName: "note.text")
+                    .font(.title3)
+                    .foregroundStyle(task.orderedNoteEntries.isEmpty ? .white.opacity(0.55) : .cyan)
+            }
+            .buttonStyle(.plain)
+            .help("Add or read notes without making this the active task")
+
             Button(action: onSelect) {
                 Image(systemName: isActive ? "target" : "play.circle")
                     .font(.title3)
@@ -182,6 +204,7 @@ private struct TaskRow: View {
             .help(isActive ? "Active task" : "Set as active")
 
             Menu {
+                Button("Notes", action: onNotes)
                 Button("Edit", action: onEdit)
                 if task.isPlanned {
                     Button("Remove from plan") { store.unplanTask(task) }
@@ -207,6 +230,7 @@ private struct TaskRow: View {
                 .stroke(isActive ? Color.yellow.opacity(0.6) : Color.clear, lineWidth: 1)
         )
         .contextMenu {
+            Button("Notes", action: onNotes)
             Button("Edit", action: onEdit)
             if task.isPlanned {
                 Button("Remove from plan") { store.unplanTask(task) }
@@ -227,6 +251,7 @@ private struct TaskEditor: View {
     let onSave: (PomoTask) -> Void
 
     @State private var title: String
+    @State private var area: LifeArea
     @State private var category: String
     @State private var estimated: Int
     @State private var newNote: String = ""
@@ -236,6 +261,8 @@ private struct TaskEditor: View {
         self.original = task
         self.onSave = onSave
         _title = State(initialValue: task?.title ?? "")
+        let startingArea = task?.area ?? .work
+        _area = State(initialValue: startingArea)
         _category = State(initialValue: task?.category ?? "Work")
         _estimated = State(initialValue: task?.estimatedPomodoros ?? 1)
         _newNote = State(initialValue: "")
@@ -249,19 +276,26 @@ private struct TaskEditor: View {
 
             Form {
                 TextField("Title", text: $title)
+                Picker("Area", selection: $area) {
+                    ForEach(LifeArea.allCases) { Text($0.label).tag($0) }
+                }
+                .onChange(of: area) { _, newArea in
+                    let options = store.settings.categories(for: newArea)
+                    if !options.contains(category) {
+                        category = options.first ?? newArea.label
+                    }
+                }
                 Picker("Category", selection: $category) {
                     ForEach(allCategories, id: \.self) { Text($0).tag($0) }
                 }
                 HStack {
-                    TextField("New category…", text: $newCategory)
+                    TextField("New \(area.label.lowercased()) category…", text: $newCategory)
                     Button("Add") {
                         let trimmed = newCategory.trimmingCharacters(in: .whitespaces)
                         guard !trimmed.isEmpty else { return }
-                        if !store.settings.categories.contains(trimmed) {
-                            var s = store.settings
-                            s.categories.append(trimmed)
-                            store.updateSettings(s)
-                        }
+                        var s = store.settings
+                        s.addCategory(trimmed, to: area)
+                        store.updateSettings(s)
                         category = trimmed
                         newCategory = ""
                     }
@@ -306,18 +340,26 @@ private struct TaskEditor: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 460, minHeight: 460)
+        .frame(minWidth: 460, minHeight: 500)
+        .onAppear {
+            if original == nil {
+                area = store.settings.activeArea
+                category = store.settings.categories(for: area).first ?? area.label
+            }
+        }
     }
 
     private var allCategories: [String] {
-        var cats = store.settings.categories
-        if let cat = original?.category, !cats.contains(cat) { cats.append(cat) }
-        return cats.isEmpty ? ["Work"] : cats
+        var cats = store.settings.categories(for: area)
+        if let cat = original?.category, original?.area == area, !cats.contains(cat) { cats.append(cat) }
+        if !cats.contains(category) { cats.append(category) }
+        return cats.isEmpty ? [area.label] : cats
     }
 
     private func save() {
         var t = original ?? PomoTask(title: title, category: category, estimatedPomodoros: estimated)
         t.title = title.trimmingCharacters(in: .whitespaces)
+        t.area = area
         t.category = category
         t.estimatedPomodoros = estimated
         t.appendNote(newNote)

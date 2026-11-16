@@ -5,6 +5,7 @@ import SwiftUI
 struct PlanView: View {
     @EnvironmentObject var store: DataStore
     @State private var weekOffset: Int = 0
+    @State private var selectedDay: Date = Calendar.current.startOfDay(for: Date())
     @State private var showingAdd = false
     @State private var draftTitle = ""
     @State private var draftCategory = "Work"
@@ -14,6 +15,7 @@ struct PlanView: View {
     @State private var draftNotes = ""
     @State private var draftMultiDay = false
     @State private var editingTask: PomoTask?
+    @State private var notesTask: PomoTask?
 
     var body: some View {
         ScrollView {
@@ -21,6 +23,7 @@ struct PlanView: View {
                 header
                 weekNav
                 addPlannedCard
+                dailyPlanSection
                 comparisonSection
                 dayBreakdown
             }
@@ -35,6 +38,16 @@ struct PlanView: View {
         .sheet(item: $editingTask) { task in
             editPlannedSheet(task)
                 .environmentObject(store)
+        }
+        .sheet(item: $notesTask) { task in
+            TaskNotesSheet(taskTitle: task.title, category: task.category, taskId: task.id)
+                .environmentObject(store)
+        }
+        .onChange(of: store.settings.activeArea) { _, area in
+            let cats = store.settings.categories(for: area)
+            if !cats.contains(draftCategory) {
+                draftCategory = cats.first ?? area.label
+            }
         }
     }
 
@@ -64,7 +77,18 @@ struct PlanView: View {
     }
 
     private var plannedThisWeek: [PomoTask] {
-        store.plannedTasks(in: weekRange)
+        store.plannedTasks(in: weekRange).filter { $0.area == store.settings.activeArea }
+    }
+
+    private var plannedOnSelectedDay: [PomoTask] {
+        let day = Calendar.current.startOfDay(for: selectedDay)
+        return store.plannedTasks(on: day).filter { $0.area == store.settings.activeArea }
+    }
+
+    private func moveWeek(by delta: Int) {
+        let cal = Calendar.current
+        weekOffset += delta
+        selectedDay = cal.startOfDay(for: cal.date(byAdding: .weekOfYear, value: delta, to: selectedDay) ?? selectedDay)
     }
 
     // MARK: - Header
@@ -75,7 +99,7 @@ struct PlanView: View {
                 Text("Plan")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(.white)
-                Text("Schedule work ahead, then compare against what you finished.")
+                Text("\(store.settings.activeArea.label) only. Schedule ahead, then compare against what you finished.")
                     .font(.callout)
                     .foregroundStyle(.white.opacity(0.7))
             }
@@ -87,7 +111,7 @@ struct PlanView: View {
                 draftTitle = ""
                 draftNotes = ""
                 draftEstimate = 1
-                draftCategory = store.settings.categories.first ?? "Work"
+                draftCategory = store.settings.categories(for: store.settings.activeArea).first ?? store.settings.activeArea.label
                 showingAdd = true
             } label: {
                 Label("Plan a task", systemImage: "plus.circle.fill")
@@ -101,7 +125,7 @@ struct PlanView: View {
     private var weekNav: some View {
         HStack {
             Button {
-                weekOffset -= 1
+                moveWeek(by: -1)
             } label: {
                 Image(systemName: "chevron.left")
                     .foregroundStyle(.white)
@@ -122,7 +146,7 @@ struct PlanView: View {
             Spacer()
 
             Button {
-                weekOffset += 1
+                moveWeek(by: 1)
             } label: {
                 Image(systemName: "chevron.right")
                     .foregroundStyle(.white)
@@ -131,11 +155,14 @@ struct PlanView: View {
             }
             .buttonStyle(.plain)
 
-            if weekOffset != 0 {
-                Button("Today") { weekOffset = 0 }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.8))
-                    .padding(.leading, 8)
+            if weekOffset != 0 || !Calendar.current.isDateInToday(selectedDay) {
+                Button("Today") {
+                    weekOffset = 0
+                    selectedDay = Calendar.current.startOfDay(for: Date())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(0.8))
+                .padding(.leading, 8)
             }
         }
         .padding(12)
@@ -200,6 +227,7 @@ struct PlanView: View {
             category: draftCategory,
             estimatedPomodoros: draftEstimate
         )
+        task.area = store.settings.activeArea
         task.appendNote(draftNotes)
         let end = draftMultiDay ? max(draftUntil, draftDay) : draftDay
         store.planTask(task, from: draftDay, until: end)
@@ -217,6 +245,152 @@ struct PlanView: View {
             return range.lowerBound.formatted(fmt)
         }
         return "\(range.lowerBound.formatted(fmt))–\(range.upperBound.formatted(fmt))"
+    }
+
+    // MARK: - Daily pick list
+
+    /// The selected day's slice of the week plan — the short list to choose from.
+    private var dailyPlanSection: some View {
+        let tasks = plannedOnSelectedDay
+        let day = Calendar.current.startOfDay(for: selectedDay)
+        let isToday = Calendar.current.isDateInToday(day)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isToday ? "Today’s plan" : "Day plan")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text(day, format: .dateTime.weekday(.wide).month(.abbreviated).day())
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+                Spacer()
+                Text("\(tasks.count) to pick from")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.65))
+            }
+
+            HStack(spacing: 6) {
+                ForEach(weekDays, id: \.self) { weekday in
+                    dayChip(weekday)
+                }
+            }
+
+            if tasks.isEmpty {
+                Text("Nothing planned for this day. Add a task above, or pick another day.")
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(tasks) { task in
+                        dailyPickRow(task)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.07))
+        )
+    }
+
+    private func dayChip(_ day: Date) -> some View {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: day)
+        let selected = cal.isDate(start, inSameDayAs: selectedDay)
+        let isToday = cal.isDateInToday(start)
+        let count = store.plannedTasks(on: start).filter { $0.area == store.settings.activeArea }.count
+        return Button {
+            selectedDay = start
+        } label: {
+            VStack(spacing: 2) {
+                Text(start, format: .dateTime.weekday(.narrow))
+                    .font(.caption2.weight(.semibold))
+                Text(start, format: .dateTime.day())
+                    .font(.callout.weight(.bold).monospacedDigit())
+                Text(count == 0 ? "—" : "\(count)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(selected ? Color.black.opacity(0.55) : Color.white.opacity(0.5))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .foregroundStyle(selected ? .black : (isToday ? .yellow : .white))
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(selected ? Color.white : Color.white.opacity(isToday ? 0.14 : 0.06))
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Show only tasks planned for this day")
+    }
+
+    private func dailyPickRow(_ task: PomoTask) -> some View {
+        let isActive = store.activeTaskId == task.id
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(task.title)
+                        .foregroundStyle(.white)
+                        .strikethrough(task.isCompleted)
+                        .lineLimit(1)
+                    if isActive {
+                        Text("ACTIVE")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.yellow)
+                    }
+                }
+                HStack(spacing: 6) {
+                    CategoryBadge(name: task.category)
+                    Text("\(task.estimatedPomodoros) 🍅")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.7))
+                    if !task.notesLog.isEmpty {
+                        Text(task.notesLog)
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.55))
+                            .lineLimit(1)
+                    }
+                }
+            }
+            Spacer(minLength: 8)
+            Button {
+                notesTask = task
+            } label: {
+                Image(systemName: "note.text")
+                    .foregroundStyle(task.orderedNoteEntries.isEmpty ? .white.opacity(0.45) : .cyan)
+            }
+            .buttonStyle(.plain)
+            .help("Read or add notes without starting this task")
+
+            if task.isCompleted {
+                Button("Undo") { markDone(task, completed: false) }
+                    .buttonStyle(.bordered)
+                    .tint(.white.opacity(0.35))
+            } else {
+                Button("Mark Done") { markDone(task, completed: true) }
+                    .buttonStyle(.bordered)
+                    .tint(.green.opacity(0.45))
+            }
+            Button {
+                startWorking(onTaskId: task.id)
+            } label: {
+                Label(isActive ? "Active" : "Start", systemImage: isActive ? "target" : "play.fill")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(isActive ? .yellow.opacity(0.35) : .white.opacity(0.22))
+            .help(isActive ? "Already the active Focus task" : "Pick this task and start it on Focus")
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isActive ? Color.yellow.opacity(0.12) : Color.white.opacity(0.04))
+        )
     }
 
     // MARK: - Comparison
@@ -294,8 +468,10 @@ struct PlanView: View {
         }
 
         // Unplanned work that still got focus time this week
+        let area = store.settings.activeArea
         let sessions = store.sessions.filter {
             $0.phase == .focus &&
+            $0.area == area &&
             $0.startedAt >= range.lowerBound && $0.startedAt <= range.upperBound
         }
         let byTitle = Dictionary(grouping: sessions, by: { $0.taskTitle })
@@ -412,6 +588,19 @@ struct PlanView: View {
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.cyan.opacity(0.9))
                     }
+                    if let task {
+                        Button {
+                            notesTask = task
+                        } label: {
+                            Image(systemName: "note.text")
+                                .font(.caption)
+                                .foregroundStyle(task.orderedNoteEntries.isEmpty ? .white.opacity(0.45) : .cyan)
+                        }
+                        .buttonStyle(.plain)
+                        .help(task.orderedNoteEntries.isEmpty
+                              ? "Add a note for later. This does not start the task."
+                              : "Read or add notes. This does not start the task.")
+                    }
                     if !row.notes.isEmpty {
                         Text(row.notes)
                             .font(.caption2)
@@ -517,6 +706,7 @@ struct PlanView: View {
         .contextMenu {
             if let task {
                 Button("Edit plan…") { editingTask = task }
+                Button("Notes…") { notesTask = task }
                 Button("Start working") { startWorking(onTaskId: task.id) }
                 Button("Remove from plan") { store.unplanTask(task) }
                 Button(task.isCompleted ? "Mark not done" : "Mark Done") {
@@ -566,12 +756,19 @@ struct PlanView: View {
     }
 
     private func dayCard(_ day: Date) -> some View {
-        let planned = store.plannedTasks(on: day)
+        let planned = store.plannedTasks(on: day).filter { $0.area == store.settings.activeArea }
         let isToday = Calendar.current.isDateInToday(day)
+        let isSelected = Calendar.current.isDate(day, inSameDayAs: selectedDay)
         return VStack(alignment: .leading, spacing: 6) {
-            Text(day, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isToday ? .yellow : .white.opacity(0.8))
+            Button {
+                selectedDay = Calendar.current.startOfDay(for: day)
+            } label: {
+                Text(day, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isToday ? .yellow : .white.opacity(0.8))
+            }
+            .buttonStyle(.plain)
+            .help("Show this day’s tasks in the pick list")
             if planned.isEmpty {
                 Text("—")
                     .font(.caption)
@@ -614,7 +811,11 @@ struct PlanView: View {
         .frame(minHeight: 110, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isToday ? Color.white.opacity(0.12) : Color.white.opacity(0.06))
+                .fill(isSelected ? Color.white.opacity(0.16) : (isToday ? Color.white.opacity(0.10) : Color.white.opacity(0.06)))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(isSelected ? Color.white.opacity(0.45) : Color.clear, lineWidth: 1)
         )
     }
 
@@ -638,7 +839,7 @@ struct PlanView: View {
             Form {
                 TextField("Title", text: $draftTitle)
                 Picker("Category", selection: $draftCategory) {
-                    ForEach(store.settings.categories, id: \.self) { Text($0).tag($0) }
+                    ForEach(store.settings.categories(for: store.settings.activeArea), id: \.self) { Text($0).tag($0) }
                 }
                 Toggle("Spans multiple days", isOn: $draftMultiDay)
                 DatePicker(draftMultiDay ? "Starts" : "Day", selection: $draftDay, displayedComponents: .date)
@@ -681,6 +882,7 @@ struct PlanView: View {
 
 private struct EditPlannedTaskSheet: View {
     @State private var title: String
+    @State private var area: LifeArea
     @State private var category: String
     @State private var estimate: Int
     @State private var newNote: String = ""
@@ -688,7 +890,6 @@ private struct EditPlannedTaskSheet: View {
     @State private var end: Date
     @State private var multiDay: Bool
 
-    let categories: [String]
     let onSave: (PomoTask) -> Void
     let onCancel: () -> Void
     private let original: PomoTask
@@ -698,6 +899,7 @@ private struct EditPlannedTaskSheet: View {
         self.onSave = onSave
         self.onCancel = onCancel
         _title = State(initialValue: task.title)
+        _area = State(initialValue: task.area)
         _category = State(initialValue: task.category)
         _estimate = State(initialValue: task.estimatedPomodoros)
         _newNote = State(initialValue: "")
@@ -707,9 +909,6 @@ private struct EditPlannedTaskSheet: View {
         _end = State(initialValue: endDay)
         _multiDay = State(initialValue: task.plannedUntil != nil &&
                           !Calendar.current.isDate(startDay, inSameDayAs: endDay))
-        self.categories = {
-            ["Work", "Study", "Personal", "Reading", "Side Project", "Quick"]
-        }()
     }
 
     @EnvironmentObject var store: DataStore
@@ -720,6 +919,15 @@ private struct EditPlannedTaskSheet: View {
                 .font(.title3.weight(.semibold))
             Form {
                 TextField("Title", text: $title)
+                Picker("Area", selection: $area) {
+                    ForEach(LifeArea.allCases) { Text($0.label).tag($0) }
+                }
+                .onChange(of: area) { _, newArea in
+                    let options = store.settings.categories(for: newArea)
+                    if !options.contains(category) {
+                        category = options.first ?? newArea.label
+                    }
+                }
                 Picker("Category", selection: $category) {
                     ForEach(allCategories, id: \.self) { Text($0).tag($0) }
                 }
@@ -759,14 +967,15 @@ private struct EditPlannedTaskSheet: View {
     }
 
     private var allCategories: [String] {
-        var cats = store.settings.categories
+        var cats = store.settings.categories(for: area)
         if !cats.contains(category) { cats.append(category) }
-        return cats.isEmpty ? categories : cats
+        return cats.isEmpty ? [area.label] : cats
     }
 
     private func save() {
         var t = original
         t.title = title.trimmingCharacters(in: .whitespaces)
+        t.area = area
         t.category = category
         t.estimatedPomodoros = estimate
         t.appendNote(newNote)

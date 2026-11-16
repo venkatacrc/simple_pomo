@@ -129,12 +129,13 @@ final class DataStore: ObservableObject {
     /// creates a lightweight ad-hoc task and makes it active immediately —
     /// no sheet, no required fields. This is the fast path used by the
     /// quick-capture field on the Focus screen.
-    func setActiveTask(title: String, category: String) {
+    func setActiveTask(title: String, category: String, area: LifeArea) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
         if let idx = tasks.firstIndex(where: {
             !$0.isCompleted && !$0.isArchived &&
+            $0.area == area &&
             $0.title.caseInsensitiveCompare(trimmed) == .orderedSame &&
             $0.category == category
         }) {
@@ -143,7 +144,8 @@ final class DataStore: ObservableObject {
             return
         }
 
-        let task = PomoTask(title: trimmed, category: category, estimatedPomodoros: 1)
+        var task = PomoTask(title: trimmed, category: category, estimatedPomodoros: 1)
+        task.area = area
         tasks.append(task)
         activeTaskId = task.id
         save()

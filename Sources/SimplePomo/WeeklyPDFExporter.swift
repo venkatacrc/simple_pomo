@@ -16,12 +16,13 @@ enum WeeklyPDFExporter {
     /// (e.g. `.month` → that calendar month, `.quarter` → that quarter).
     static func export(store: DataStore, period: ReportPeriod, containing date: Date = Date()) {
         let range = dateRange(for: period, containing: date)
-        let data = renderPDF(store: store, period: period, range: range)
+        let area = store.settings.activeArea
+        let data = renderPDF(store: store, period: period, range: range, area: area)
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
         panel.canCreateDirectories = true
-        panel.nameFieldStringValue = defaultFilename(period: period, range: range)
-        panel.title = "Export \(period.label.lowercased()) summary"
+        panel.nameFieldStringValue = defaultFilename(period: period, range: range, area: area)
+        panel.title = "Export \(area.label) \(period.label.lowercased()) summary"
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             do {
@@ -81,24 +82,25 @@ enum WeeklyPDFExporter {
         }
     }
 
-    private static func defaultFilename(period: ReportPeriod, range: ClosedRange<Date>) -> String {
+    private static func defaultFilename(period: ReportPeriod, range: ClosedRange<Date>, area: LifeArea) -> String {
         let start = range.lowerBound
         let fiscal = WalmartFiscal(now: start)
         let fmt = DateFormatter()
+        let prefix = "SimplePomo-\(area.label)"
         switch period {
         case .day:
             fmt.dateFormat = "yyyy-MM-dd"
-            return "SimplePomo-Day-\(fmt.string(from: start)).pdf"
+            return "\(prefix)-Day-\(fmt.string(from: start)).pdf"
         case .week:
             fmt.dateFormat = "yyyy-'W'ww"
-            return "SimplePomo-\(fmt.string(from: start)).pdf"
+            return "\(prefix)-\(fmt.string(from: start)).pdf"
         case .month:
             fmt.dateFormat = "yyyy-MM"
-            return "SimplePomo-Month-\(fmt.string(from: start)).pdf"
+            return "\(prefix)-Month-\(fmt.string(from: start)).pdf"
         case .quarter:
-            return "SimplePomo-\(fiscal.currentLabel).pdf"
+            return "\(prefix)-\(fiscal.currentLabel).pdf"
         case .year:
-            return "SimplePomo-FY\(fiscal.fiscalYear).pdf"
+            return "\(prefix)-FY\(fiscal.fiscalYear).pdf"
         }
     }
 
@@ -108,7 +110,7 @@ enum WeeklyPDFExporter {
     private static let pageHeight: CGFloat = 792
     private static let margin: CGFloat = 48
 
-    private static func renderPDF(store: DataStore, period: ReportPeriod, range: ClosedRange<Date>) -> Data {
+    private static func renderPDF(store: DataStore, period: ReportPeriod, range: ClosedRange<Date>, area: LifeArea) -> Data {
         let mutable = NSMutableData()
         var mediaBox = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
         guard let consumer = CGDataConsumer(data: mutable as CFMutableData),
@@ -118,13 +120,13 @@ enum WeeklyPDFExporter {
 
         ctx.beginPage(mediaBox: &mediaBox)
         var y = pageHeight - margin
-        y = drawTitle(ctx, y: y, period: period, range: range)
-        y = drawSummary(ctx, y: y, store: store, period: period, range: range)
+        y = drawTitle(ctx, y: y, period: period, range: range, area: area)
+        y = drawSummary(ctx, y: y, store: store, period: period, range: range, area: area)
         y = drawSection(ctx, title: "Planned vs completed", y: y)
-        y = drawComparison(ctx, y: y, store: store, range: range, mediaBox: &mediaBox)
+        y = drawComparison(ctx, y: y, store: store, range: range, area: area, mediaBox: &mediaBox)
         y = ensureSpace(ctx, y: y, needed: 80, mediaBox: &mediaBox)
         y = drawSection(ctx, title: "Focus sessions & notes", y: y)
-        y = drawSessions(ctx, y: y, store: store, period: period, range: range, mediaBox: &mediaBox)
+        y = drawSessions(ctx, y: y, store: store, period: period, range: range, area: area, mediaBox: &mediaBox)
         ctx.endPage()
         ctx.closePDF()
         return mutable as Data
@@ -145,7 +147,7 @@ enum WeeklyPDFExporter {
 
     @discardableResult
     private static func drawTitle(_ ctx: CGContext, y: CGFloat,
-                                  period: ReportPeriod, range: ClosedRange<Date>) -> CGFloat {
+                                  period: ReportPeriod, range: ClosedRange<Date>, area: LifeArea) -> CGFloat {
         let df = DateFormatter()
         df.dateStyle = .medium
         let start = range.lowerBound
@@ -166,19 +168,20 @@ enum WeeklyPDFExporter {
         case .year:
             span = "\(Calendar.current.component(.year, from: start))"
         }
-        let line = "\(period.label) Summary  ·  \(span)"
+        let line = "\(area.label)  ·  \(period.label) Summary  ·  \(span)"
         return drawText(ctx, line, at: CGPoint(x: margin, y: y),
                         font: .boldSystemFont(ofSize: 18), color: .black) - 8
     }
 
     @discardableResult
     private static func drawSummary(_ ctx: CGContext, y: CGFloat, store: DataStore,
-                                    period: ReportPeriod, range: ClosedRange<Date>) -> CGFloat {
+                                    period: ReportPeriod, range: ClosedRange<Date>, area: LifeArea) -> CGFloat {
         let sessions = store.sessions.filter {
-            $0.phase == .focus && $0.startedAt >= range.lowerBound && $0.startedAt <= range.upperBound
+            $0.phase == .focus && $0.area == area &&
+            $0.startedAt >= range.lowerBound && $0.startedAt <= range.upperBound
         }
         let minutes = sessions.reduce(0.0) { $0 + $1.durationMinutes }
-        let planned = store.plannedTasks(in: range)
+        let planned = store.plannedTasks(in: range).filter { $0.area == area }
         let done = planned.filter { task in
             task.isCompleted || store.focusSessionCount(for: task, in: range) >= max(task.estimatedPomodoros, 1)
         }.count
@@ -203,10 +206,10 @@ enum WeeklyPDFExporter {
 
     @discardableResult
     private static func drawComparison(_ ctx: CGContext, y: CGFloat, store: DataStore,
-                                       range: ClosedRange<Date>,
+                                       range: ClosedRange<Date>, area: LifeArea,
                                        mediaBox: inout CGRect) -> CGFloat {
         var cursor = y
-        let planned = store.plannedTasks(in: range)
+        let planned = store.plannedTasks(in: range).filter { $0.area == area }
         if planned.isEmpty {
             return drawText(ctx, "No tasks were planned in this period.",
                             at: CGPoint(x: margin, y: cursor),
@@ -255,12 +258,15 @@ enum WeeklyPDFExporter {
 
     @discardableResult
     private static func drawSessions(_ ctx: CGContext, y: CGFloat, store: DataStore,
-                                     period: ReportPeriod, range: ClosedRange<Date>,
+                                     period: ReportPeriod, range: ClosedRange<Date>, area: LifeArea,
                                      mediaBox: inout CGRect) -> CGFloat {
         var cursor = y
         let cal = Calendar.current
         let sessions = store.sessions
-            .filter { $0.phase == .focus && $0.startedAt >= range.lowerBound && $0.startedAt <= range.upperBound }
+            .filter {
+                $0.phase == .focus && $0.area == area &&
+                $0.startedAt >= range.lowerBound && $0.startedAt <= range.upperBound
+            }
             .sorted { $0.startedAt > $1.startedAt }
 
         if sessions.isEmpty {

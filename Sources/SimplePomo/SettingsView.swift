@@ -78,41 +78,46 @@ struct SettingsView: View {
     // MARK: - Categories
 
     @State private var newCategory: String = ""
+    @State private var newCategoryArea: LifeArea = .work
 
     private var categorySettings: some View {
         Form {
-            Section("Existing categories") {
-                if store.settings.categories.isEmpty {
-                    Text("No categories yet.").foregroundStyle(.secondary)
-                }
-                ForEach(store.settings.categories, id: \.self) { cat in
-                    HStack {
-                        CategoryBadge(name: cat)
-                        Text(cat)
-                        Spacer()
-                        Button(role: .destructive) {
-                            var s = store.settings
-                            s.categories.removeAll { $0 == cat }
-                            store.updateSettings(s)
-                        } label: {
-                            Image(systemName: "trash")
+            ForEach(LifeArea.allCases) { area in
+                Section("\(area.label) categories") {
+                    let names = store.settings.categories(for: area)
+                    if names.isEmpty {
+                        Text("No \(area.label.lowercased()) categories yet.").foregroundStyle(.secondary)
+                    }
+                    ForEach(names, id: \.self) { cat in
+                        HStack {
+                            CategoryBadge(name: cat)
+                            Text(cat)
+                            Spacer()
+                            Button(role: .destructive) {
+                                var s = store.settings
+                                s.removeCategory(cat, from: area)
+                                store.updateSettings(s)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.red)
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.red)
                     }
                 }
             }
             Section("Add category") {
+                Picker("Area", selection: $newCategoryArea) {
+                    ForEach(LifeArea.allCases) { Text($0.label).tag($0) }
+                }
                 HStack {
                     TextField("Name", text: $newCategory)
                     Button("Add") {
                         let trimmed = newCategory.trimmingCharacters(in: .whitespaces)
                         guard !trimmed.isEmpty else { return }
                         var s = store.settings
-                        if !s.categories.contains(trimmed) {
-                            s.categories.append(trimmed)
-                            store.updateSettings(s)
-                        }
+                        s.addCategory(trimmed, to: newCategoryArea)
+                        store.updateSettings(s)
                         newCategory = ""
                     }
                     .disabled(newCategory.trimmingCharacters(in: .whitespaces).isEmpty)

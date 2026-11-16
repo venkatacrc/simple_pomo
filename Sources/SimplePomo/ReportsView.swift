@@ -107,11 +107,13 @@ struct ReportsView: View {
 
     /// A fresh, unsaved entry template for the "+" / "Add more time" flows.
     private func blankDraft(date: Date, title: String = "", category: String? = nil) -> PomoSession {
-        PomoSession.manual(
+        let area = store.settings.activeArea
+        return PomoSession.manual(
             title: title,
-            category: category ?? (store.settings.categories.first ?? "Quick"),
+            category: category ?? (store.settings.categories(for: area).first ?? area.label),
             date: date,
-            minutes: 25
+            minutes: 25,
+            area: area
         )
     }
 
@@ -159,8 +161,9 @@ struct ReportsView: View {
 
     private var sessionsInRange: [PomoSession] {
         let r = range
+        let area = store.settings.activeArea
         return store.sessions.filter {
-            $0.phase == .focus && $0.startedAt >= r.lowerBound && $0.startedAt <= r.upperBound
+            $0.phase == .focus && $0.area == area && $0.startedAt >= r.lowerBound && $0.startedAt <= r.upperBound
         }
     }
 
@@ -170,7 +173,7 @@ struct ReportsView: View {
         let fiscal = WalmartFiscal()
         return HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Reports")
+                Text("\(store.settings.activeArea.label) reports")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(.white)
                 if period == .quarter {

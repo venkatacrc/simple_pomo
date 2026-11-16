@@ -59,13 +59,24 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 16) {
-            HStack(spacing: 10) {
-                Image(systemName: "leaf.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.white)
-                Text("Simple Pomo")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white)
+            HStack(spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "leaf.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.white)
+                    Text("Simple Pomo")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+                Picker("Area", selection: activeArea) {
+                    ForEach(LifeArea.allCases) { area in
+                        Text(area.label).tag(area)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 168)
+                .help("Show only Work or only Personal tasks, plans, and reports")
             }
             .frame(minWidth: 140, alignment: .leading)
 
@@ -92,7 +103,7 @@ struct ContentView: View {
                     Text("\(todayPomodoroCount)")
                         .monospacedDigit()
                         .foregroundStyle(.white)
-                    Text("today")
+                    Text("\(store.settings.activeArea.label.lowercased()) today")
                         .foregroundStyle(.white.opacity(0.7))
                         .font(.callout)
                 }
@@ -133,10 +144,22 @@ struct ContentView: View {
         }
     }
 
+    private var activeArea: Binding<LifeArea> {
+        Binding(
+            get: { store.settings.activeArea },
+            set: { area in
+                var settings = store.settings
+                settings.activeArea = area
+                store.updateSettings(settings)
+            }
+        )
+    }
+
     private var todayPomodoroCount: Int {
         let cal = Calendar.current
+        let area = store.settings.activeArea
         return store.sessions.filter {
-            $0.phase == .focus && cal.isDateInToday($0.startedAt)
+            $0.phase == .focus && $0.area == area && cal.isDateInToday($0.startedAt)
         }.count
     }
 

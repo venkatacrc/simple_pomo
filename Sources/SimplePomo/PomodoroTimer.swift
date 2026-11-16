@@ -128,10 +128,12 @@ final class PomodoroTimer: ObservableObject {
     private func recordSession(start: Date, end: Date) {
         guard let store else { return }
         let task = store.activeTask
+        let area = task?.area ?? store.settings.activeArea
         let session = PomoSession(
             taskId: task?.id,
             taskTitle: task?.title ?? "Focus",
-            category: task?.category ?? "Uncategorized",
+            category: task?.category ?? (store.settings.categories(for: area).first ?? area.label),
+            area: area,
             phase: .focus,
             startedAt: start,
             endedAt: end

@@ -45,12 +45,40 @@ struct TaskNoteEntry: Identifiable, Codable, Equatable, Hashable {
     var createdAt: Date = Date()
 }
 
+// MARK: - Work vs Personal
+
+/// The two lanes a task, plan, and focus session belong to.
+/// Existing tasks without this field are placed by category name
+/// (Personal, Reading, Health, and similar → Personal; everything else → Work).
+enum LifeArea: String, Codable, CaseIterable, Identifiable {
+    case work, personal
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .work: return "Work"
+        case .personal: return "Personal"
+        }
+    }
+
+    private static let personalNames: Set<String> = [
+        "personal", "reading", "health", "home", "family", "hobby", "life", "errands", "fitness"
+    ]
+
+    static func inferred(from category: String) -> LifeArea {
+        let key = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return personalNames.contains(key) ? .personal : .work
+    }
+}
+
 // MARK: - Task
 
 struct PomoTask: Identifiable, Codable, Equatable, Hashable {
     var id: UUID = UUID()
     var title: String
     var category: String
+    /// Work or Personal. Separate from the finer category tag.
+    var area: LifeArea = .work
     var estimatedPomodoros: Int = 1
     var completedPomodoros: Int = 0
     /// Legacy flat notes string. Kept in sync with `noteEntries` for older
@@ -127,7 +155,7 @@ struct PomoTask: Identifiable, Codable, Equatable, Hashable {
 
 extension PomoTask {
     private enum CodingKeys: String, CodingKey {
-        case id, title, category, estimatedPomodoros, completedPomodoros
+        case id, title, category, area, estimatedPomodoros, completedPomodoros
         case notes, noteEntries, isCompleted, isArchived, createdAt
         case plannedFor, plannedUntil, isPlanned
     }
@@ -137,6 +165,7 @@ extension PomoTask {
         id = try c.decode(UUID.self, forKey: .id)
         title = try c.decode(String.self, forKey: .title)
         category = try c.decode(String.self, forKey: .category)
+        area = try c.decodeIfPresent(LifeArea.self, forKey: .area) ?? LifeArea.inferred(from: category)
         estimatedPomodoros = try c.decodeIfPresent(Int.self, forKey: .estimatedPomodoros) ?? 1
         completedPomodoros = try c.decodeIfPresent(Int.self, forKey: .completedPomodoros) ?? 0
         notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
@@ -158,6 +187,7 @@ struct PomoSession: Identifiable, Codable, Equatable {
     var taskId: UUID?
     var taskTitle: String
     var category: String
+    var area: LifeArea = .work
     var phase: Phase
     var startedAt: Date
     var endedAt: Date
@@ -175,11 +205,12 @@ struct PomoSession: Identifiable, Codable, Equatable {
 
     /// Convenience constructor for manually-logged work: pick a date and a
     /// duration in minutes rather than start/end timestamps.
-    static func manual(title: String, category: String, date: Date, minutes: Int) -> PomoSession {
+    static func manual(title: String, category: String, date: Date, minutes: Int, area: LifeArea? = nil) -> PomoSession {
         PomoSession(
             taskId: nil,
             taskTitle: title,
             category: category,
+            area: area ?? LifeArea.inferred(from: category),
             phase: .focus,
             startedAt: date,
             endedAt: date.addingTimeInterval(TimeInterval(minutes * 60)),
@@ -190,7 +221,7 @@ struct PomoSession: Identifiable, Codable, Equatable {
 
 extension PomoSession {
     private enum CodingKeys: String, CodingKey {
-        case id, taskId, taskTitle, category, phase, startedAt, endedAt, isManual
+        case id, taskId, taskTitle, category, area, phase, startedAt, endedAt, isManual
     }
 
     /// Store files written before `isManual` existed don't contain the key.
@@ -200,6 +231,7 @@ extension PomoSession {
         taskId = try c.decodeIfPresent(UUID.self, forKey: .taskId)
         taskTitle = try c.decode(String.self, forKey: .taskTitle)
         category = try c.decode(String.self, forKey: .category)
+        area = try c.decodeIfPresent(LifeArea.self, forKey: .area) ?? LifeArea.inferred(from: category)
         phase = try c.decode(Phase.self, forKey: .phase)
         startedAt = try c.decode(Date.self, forKey: .startedAt)
         endedAt = try c.decode(Date.self, forKey: .endedAt)
@@ -324,7 +356,7 @@ enum TimerPreset: String, CaseIterable, Identifiable, Codable {
 
 // MARK: - Settings
 
-struct AppSettings: Codable, Equatable {
+struct AppSettings: Equatable {
     var focusMinutes: Int = 25
     var shortBreakMinutes: Int = 5
     var longBreakMinutes: Int = 15
@@ -333,7 +365,35 @@ struct AppSettings: Codable, Equatable {
     var autoStartPomodoros: Bool = false
     var playSound: Bool = true
     var soundName: String = "Glass"
-    var categories: [String] = ["Work", "Study", "Personal", "Reading", "Side Project"]
+    var workCategories: [String] = ["Work", "Study", "Side Project"]
+    var personalCategories: [String] = ["Personal", "Reading", "Health"]
+    /// Which lane the app is showing. Tasks, plans, focus lists, and reports follow this.
+    var activeArea: LifeArea = .work
+
+    func categories(for area: LifeArea) -> [String] {
+        let list = area == .work ? workCategories : personalCategories
+        return list.isEmpty ? [area.label] : list
+    }
+
+    mutating func addCategory(_ raw: String, to area: LifeArea) {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        switch area {
+        case .work:
+            if !workCategories.contains(name) { workCategories.append(name) }
+            personalCategories.removeAll { $0 == name }
+        case .personal:
+            if !personalCategories.contains(name) { personalCategories.append(name) }
+            workCategories.removeAll { $0 == name }
+        }
+    }
+
+    mutating func removeCategory(_ name: String, from area: LifeArea) {
+        switch area {
+        case .work: workCategories.removeAll { $0 == name }
+        case .personal: personalCategories.removeAll { $0 == name }
+        }
+    }
 
     func minutes(for phase: Phase) -> Int {
         switch phase {
@@ -357,6 +417,56 @@ struct AppSettings: Codable, Equatable {
         focusMinutes = preset.focusMinutes
         shortBreakMinutes = preset.shortBreakMinutes
         longBreakMinutes = preset.longBreakMinutes
+    }
+}
+
+extension AppSettings: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case focusMinutes, shortBreakMinutes, longBreakMinutes, longBreakEvery
+        case autoStartBreaks, autoStartPomodoros, playSound, soundName
+        case categories, workCategories, personalCategories, activeArea
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        focusMinutes = try c.decodeIfPresent(Int.self, forKey: .focusMinutes) ?? 25
+        shortBreakMinutes = try c.decodeIfPresent(Int.self, forKey: .shortBreakMinutes) ?? 5
+        longBreakMinutes = try c.decodeIfPresent(Int.self, forKey: .longBreakMinutes) ?? 15
+        longBreakEvery = try c.decodeIfPresent(Int.self, forKey: .longBreakEvery) ?? 4
+        autoStartBreaks = try c.decodeIfPresent(Bool.self, forKey: .autoStartBreaks) ?? true
+        autoStartPomodoros = try c.decodeIfPresent(Bool.self, forKey: .autoStartPomodoros) ?? false
+        playSound = try c.decodeIfPresent(Bool.self, forKey: .playSound) ?? true
+        soundName = try c.decodeIfPresent(String.self, forKey: .soundName) ?? "Glass"
+        activeArea = try c.decodeIfPresent(LifeArea.self, forKey: .activeArea) ?? .work
+
+        let storedWork = try c.decodeIfPresent([String].self, forKey: .workCategories)
+        let storedPersonal = try c.decodeIfPresent([String].self, forKey: .personalCategories)
+        if storedWork == nil && storedPersonal == nil {
+            let legacy = try c.decodeIfPresent([String].self, forKey: .categories)
+                ?? ["Work", "Study", "Personal", "Reading", "Side Project"]
+            workCategories = legacy.filter { LifeArea.inferred(from: $0) == .work }
+            personalCategories = legacy.filter { LifeArea.inferred(from: $0) == .personal }
+            if workCategories.isEmpty { workCategories = ["Work"] }
+            if personalCategories.isEmpty { personalCategories = ["Personal"] }
+        } else {
+            workCategories = storedWork ?? ["Work", "Study", "Side Project"]
+            personalCategories = storedPersonal ?? ["Personal", "Reading", "Health"]
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(focusMinutes, forKey: .focusMinutes)
+        try c.encode(shortBreakMinutes, forKey: .shortBreakMinutes)
+        try c.encode(longBreakMinutes, forKey: .longBreakMinutes)
+        try c.encode(longBreakEvery, forKey: .longBreakEvery)
+        try c.encode(autoStartBreaks, forKey: .autoStartBreaks)
+        try c.encode(autoStartPomodoros, forKey: .autoStartPomodoros)
+        try c.encode(playSound, forKey: .playSound)
+        try c.encode(soundName, forKey: .soundName)
+        try c.encode(workCategories, forKey: .workCategories)
+        try c.encode(personalCategories, forKey: .personalCategories)
+        try c.encode(activeArea, forKey: .activeArea)
     }
 }
 

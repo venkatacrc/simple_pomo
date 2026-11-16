@@ -6,6 +6,7 @@ struct FocusView: View {
     @State private var draftText: String = ""
     @State private var draftCategory: String = ""
     @State private var draftNotes: String = ""
+    @State private var notesTask: PomoTask?
     @FocusState private var captureFocused: Bool
 
     var body: some View {
@@ -201,6 +202,9 @@ struct FocusView: View {
                     Image(systemName: "target")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
+                    Text(task.area.label)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(task.area == .work ? .white : .mint)
                     Text("\(task.completedPomodoros)/\(task.estimatedPomodoros) pomodoros logged")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.75))
@@ -225,6 +229,11 @@ struct FocusView: View {
         )
         .onAppear { syncDraftFromActiveTask() }
         .onChange(of: store.activeTaskId) { _, _ in syncDraftFromActiveTask() }
+        .onChange(of: store.settings.activeArea) { _, _ in syncDraftFromActiveTask() }
+        .sheet(item: $notesTask) { task in
+            TaskNotesSheet(taskTitle: task.title, category: task.category, taskId: task.id)
+                .environmentObject(store)
+        }
         .onChange(of: timer.phase) { _, newPhase in
             // Flush any pending note when a focus block ends so it isn't lost.
             if newPhase != .focus {
@@ -320,8 +329,14 @@ struct FocusView: View {
     }
 
     private func syncDraftFromActiveTask() {
-        draftText = store.activeTask?.title ?? ""
-        draftCategory = store.activeTask?.category ?? store.settings.categories.first ?? "Quick"
+        let area = store.settings.activeArea
+        if let task = store.activeTask, task.area == area {
+            draftText = task.title
+            draftCategory = task.category
+        } else {
+            draftText = ""
+            draftCategory = store.settings.categories(for: area).first ?? area.label
+        }
         // Never load history into the draft — draft is only for new appends.
         draftNotes = ""
     }
@@ -363,16 +378,18 @@ struct FocusView: View {
     }
 
     private var allCategoryOptions: [String] {
-        var cats = store.settings.categories
-        if !cats.contains("Quick") { cats.append("Quick") }
+        let area = store.settings.activeArea
+        var cats = store.settings.categories(for: area)
+        if !draftCategory.isEmpty, !cats.contains(draftCategory) { cats.append(draftCategory) }
         return cats
     }
 
     private func commitDraft() {
         let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let cat = draftCategory.isEmpty ? (store.settings.categories.first ?? "Quick") : draftCategory
-        store.setActiveTask(title: trimmed, category: cat)
+        let area = store.settings.activeArea
+        let cat = draftCategory.isEmpty ? (store.settings.categories(for: area).first ?? area.label) : draftCategory
+        store.setActiveTask(title: trimmed, category: cat, area: area)
         draftCategory = cat
         captureFocused = false
     }
@@ -380,7 +397,8 @@ struct FocusView: View {
     // MARK: - Quick task list (today)
 
     private var quickTaskList: some View {
-        let openTasks = store.tasks.filter { !$0.isArchived && !$0.isCompleted }
+        let area = store.settings.activeArea
+        let openTasks = store.tasks.filter { !$0.isArchived && !$0.isCompleted && $0.area == area }
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Up next")
@@ -392,14 +410,14 @@ struct FocusView: View {
                     .foregroundStyle(.white.opacity(0.6))
             }
             if openTasks.isEmpty {
-                Text("Add tasks in the Tasks tab to track them here.")
+                Text("No open \(area.label.lowercased()) tasks. Add some in the Tasks tab, or switch areas in the header.")
                     .foregroundStyle(.white.opacity(0.65))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 10)
             } else {
                 VStack(spacing: 6) {
                     ForEach(openTasks.prefix(5)) { task in
-                        QuickTaskRow(task: task)
+                        QuickTaskRow(task: task) { notesTask = task }
                     }
                 }
             }
@@ -412,6 +430,7 @@ struct FocusView: View {
 private struct QuickTaskRow: View {
     @EnvironmentObject var store: DataStore
     let task: PomoTask
+    var onNotes: () -> Void = {}
 
     var body: some View {
         let isActive = store.activeTaskId == task.id
@@ -434,6 +453,13 @@ private struct QuickTaskRow: View {
             Text("\(task.completedPomodoros)/\(task.estimatedPomodoros)")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.white.opacity(0.75))
+
+            Button(action: onNotes) {
+                Image(systemName: "note.text")
+                    .foregroundStyle(task.orderedNoteEntries.isEmpty ? .white.opacity(0.55) : .cyan)
+            }
+            .buttonStyle(.plain)
+            .help("Add or read notes without starting this task")
 
             Button {
                 store.activeTaskId = isActive ? nil : task.id

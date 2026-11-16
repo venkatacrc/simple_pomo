@@ -16,6 +16,7 @@ struct SessionEditorSheet: View {
     let onDelete: (() -> Void)?
 
     @State private var title: String
+    @State private var area: LifeArea
     @State private var category: String
     @State private var date: Date
     @State private var minutes: Int
@@ -32,6 +33,7 @@ struct SessionEditorSheet: View {
         self.onSave = onSave
         self.onDelete = onDelete
         _title = State(initialValue: session.taskTitle)
+        _area = State(initialValue: session.area)
         _category = State(initialValue: session.category)
         _date = State(initialValue: session.startedAt)
         _minutes = State(initialValue: max(5, Int(session.durationMinutes.rounded())))
@@ -45,6 +47,15 @@ struct SessionEditorSheet: View {
 
             Form {
                 TextField("What did you work on?", text: $title)
+                Picker("Area", selection: $area) {
+                    ForEach(LifeArea.allCases) { Text($0.label).tag($0) }
+                }
+                .onChange(of: area) { _, newArea in
+                    let options = store.settings.categories(for: newArea)
+                    if !options.contains(category) {
+                        category = options.first ?? newArea.label
+                    }
+                }
                 Picker("Category", selection: $category) {
                     ForEach(categoryOptions, id: \.self) { Text($0).tag($0) }
                 }
@@ -123,10 +134,9 @@ struct SessionEditorSheet: View {
     }
 
     private var categoryOptions: [String] {
-        var cats = store.settings.categories
+        var cats = store.settings.categories(for: area)
         if !category.isEmpty, !cats.contains(category) { cats.append(category) }
-        if !cats.contains("Quick") { cats.append("Quick") }
-        return cats
+        return cats.isEmpty ? [area.label] : cats
     }
 
     private var pomodoroCountLabel: String {
@@ -137,6 +147,7 @@ struct SessionEditorSheet: View {
     private func save() {
         var updated = original
         updated.taskTitle = title.trimmingCharacters(in: .whitespaces)
+        updated.area = area
         updated.category = category
         updated.startedAt = date
         updated.endedAt = date.addingTimeInterval(TimeInterval(minutes * 60))
@@ -154,6 +165,7 @@ struct SessionEditorSheet: View {
             } else {
                 // Create a lightweight task so notes have a home.
                 var task = PomoTask(title: updated.taskTitle, category: updated.category)
+                task.area = updated.area
                 task.appendNote(noteText)
                 store.addTask(task)
                 updated.taskId = task.id
