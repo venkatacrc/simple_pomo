@@ -24,6 +24,21 @@ A native macOS Pomodoro timer with tasks, categories and rich reports — inspir
 - **Keyboard shortcuts** — `Space` start/pause, `⌘R` reset, `⌘K` skip, `⌘N` new task.
 - **Native settings** via standard `⌘,` Settings window (Timer/Categories/Data/About).
 
+## Phone web app (PWA)
+
+The same app is available as an installable web app, served from `docs/` by GitHub Pages:
+**https://venkatacrc.github.io/simple_pomo/**
+
+- Open it on your phone, then **Add to Home Screen** (iOS Safari: Share ▸ Add to Home Screen; Android Chrome: ⋮ ▸ Install app).
+- Same features: timer + presets, Work/Personal areas, tasks with append-only notes, weekly/daily plan
+  (Upcoming / Done / Partial / Missed), reports on Walmart fiscal quarters, and the "Present" year clock.
+- Data lives on the device (`localStorage`). Use **Settings ▸ Export / Import JSON** to move data between
+  the Mac app's `store.json` and the phone (same format; import can merge or replace).
+- Phones suspend background pages, so the timer keeps the screen awake while running and catches up when
+  you return. Keep the app in the foreground for alerts.
+- No build step: plain ES modules. To try locally: `python3 -m http.server -d docs 8000`.
+- Pages setting: **Settings ▸ Pages ▸ Deploy from a branch ▸ `main` / `/docs`** (a root `index.html` also redirects to `docs/` if you chose `/ (root)`).
+
 ## Requirements
 
 - macOS 14 (Sonoma) or later
